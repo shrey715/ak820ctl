@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ak820ctl"
+dynamic = ["version"]
+description = "unofficial linux driver for the ajazz ak820 max plus keyboard (rgb, keymaps, macros, battery)"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Shreyas Deb", email = "shreyasdeb@gmail.com" }]
+requires-python = ">=3.9"
+dependencies = ["rich>=12", "textual>=0.80"]
+keywords = ["ajazz", "ak820", "keyboard", "rgb", "hid", "linux", "tui"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: System :: Hardware :: Hardware Drivers",
+]
+
+[project.urls]
+Homepage = "https://github.com/shrey715/ak820ctl"
+Issues = "https://github.com/shrey715/ak820ctl/issues"
+Protocol = "https://github.com/shrey715/ak820ctl/blob/main/PROTOCOL.md"
+
+[project.scripts]
+ak820ctl = "ak820.cli:main"
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[tool.setuptools]
+packages = ["ak820"]
+
+[tool.setuptools.dynamic]
+version = { attr = "ak820.__version__" }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
