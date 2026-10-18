@@ -25,7 +25,16 @@ unplug and replug the dongle or cable after that.
 
 ## usage
 
-run `ak820ctl` with no arguments to get the tui. it has tabs for lighting, per-key rgb, remaps, macros and settings. you click keys on the keyboard map to select them, pick a color, and hit upload. battery refreshes every 5 seconds.
+run `ak820ctl` with no arguments to get the tui.
+
+- lighting: pick an effect from the list, and the sliders it doesn't use grey out
+- per-key rgb: click or drag across the keyboard map to paint, fill patterns (rainbows, gradients, a wasd highlight), save your designs as presets, then upload
+- remap and macro: click the key you want on the map, remapped keys get tinted, and you can restore any of them one by one
+- settings: sleep timer, key response, fn switch, factory reset
+
+the keyboard can't report its settings back, so the tui keeps track of what it last sent in `~/.config/ak820ctl` and opens where you left off. `1`-`5` switch tabs, `ctrl+s` applies the current one, `l` shows the packet log and `?` has the rest.
+
+![remap tab](https://raw.githubusercontent.com/shrey715/ak820ctl/main/docs/tui-remap.svg)
 
 everything is also available as plain commands if you want to script it:
 
