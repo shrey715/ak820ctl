@@ -1,0 +1,60 @@
+name: publish
+
+# Runs on every push to main. Uploads to PyPI only when the version in
+# ak820/__init__.py isn't on PyPI yet, so bumping the version = a release.
+# Auth is PyPI trusted publishing (OIDC): no token is stored anywhere.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: pytest -q
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # trusted publishing
+      contents: write  # tag + github release
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: check whether this version is already on pypi
+        id: version
+        run: |
+          v=$(python -c "import re; print(re.search(r'__version__ = \"(.+?)\"', open('ak820/__init__.py').read()).group(1))")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          if curl -sfo /dev/null "https://pypi.org/pypi/ak820ctl/$v/json"; then
+            echo "new=false" >> "$GITHUB_OUTPUT"
+            echo "$v is already on pypi, nothing to publish"
+          else
+            echo "new=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: build
+        if: steps.version.outputs.new == 'true'
+        run: pip install build && python -m build
+
+      - name: upload to pypi
+        if: steps.version.outputs.new == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+
+      - name: github release
+        if: steps.version.outputs.new == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "v${{ steps.version.outputs.version }}" dist/* --generate-notes

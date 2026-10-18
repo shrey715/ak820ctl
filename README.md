@@ -70,6 +70,8 @@ python -m venv .venv && .venv/bin/pip install -e ".[dev]"
 .venv/bin/pytest
 ```
 
+releases are automatic: bump `__version__` in `ak820/__init__.py` and push to main. the publish workflow runs the tests, uploads to pypi through trusted publishing (no tokens anywhere) and makes a github release. pushes that don't change the version just run the tests.
+
 ## license
 
 mit. "ajazz" and "ak820" are their owner's trademarks and only used here to say what hardware this is for.
