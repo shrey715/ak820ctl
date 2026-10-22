@@ -2,7 +2,7 @@ import { DATA } from "./data.js";
 import {
   Keyboard, codeName, control, hidSupported, loadState, parseMacroEvents, saveState, targetCode,
 } from "./protocol.js";
-import { Analyzer, BANDS, MusicRenderer, pattern, previewFrame } from "./effects.js";
+import { Analyzer, BANDS, MusicRenderer, REACTIVE, pattern, previewFrame } from "./effects.js";
 
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
@@ -119,7 +119,14 @@ function rangeFill(input) {
 }
 
 // -- keyboard rendering -----------------------------------------------------------
-const VIEW = { x: 16, y: 30, w: 562, h: 238 };
+// Board bounds from the key rectangles, with room for the case around them.
+const VIEW = (() => {
+  const xs = DATA.keys.flatMap(({ rect: [x, , w] }) => [x, x + w]);
+  const ys = DATA.keys.flatMap(({ rect: [, y, , h] }) => [y, y + h]);
+  const pad = 14;
+  const x = Math.min(...xs) - pad, y = Math.min(...ys) - pad;
+  return { x, y, w: Math.max(...xs) + pad - x, h: Math.max(...ys) + pad - y };
+})();
 
 function rr(ctx, x, y, w, h, r) {
   ctx.beginPath();
@@ -216,6 +223,8 @@ function keyAt(canvas, e) {
 
 // -- stage (the big keyboard) ---------------------------------------------------
 const stage = $("#stage");
+const ASPECT = `${VIEW.w} / ${VIEW.h}`;
+stage.style.aspectRatio = ASPECT;
 let dragging = false, lastKey = null;
 stage.addEventListener("pointerdown", (e) => {
   const key = keyAt(stage, e);
@@ -233,8 +242,12 @@ const endDrag = () => { dragging = false; lastKey = null; };
 stage.addEventListener("pointerup", endDrag);
 stage.addEventListener("pointercancel", endDrag);
 
+const userPresses = [];  // keys clicked on the board, for reactive effect previews
 function onStageKey(key, drag) {
-  if (activeTab === "rgb") paintKey(key, drag);
+  if (activeTab === "light") {
+    userPresses.push([key.led, (performance.now() - t0) / 1000]);
+    if (userPresses.length > 12) userPresses.shift();
+  } else if (activeTab === "rgb") paintKey(key, drag);
   else if (activeTab === "remap" && !drag) { remapSrc = key.code; refreshRemaps(); }
   else if (activeTab === "macro" && !drag) pickMacroKey(key.code);
 }
@@ -251,7 +264,7 @@ function stageContent(t) {
     case "music":
       return [musicFrame, { labels: 0.35 }];
     default:
-      return [st.lights_off ? {} : previewFrame(light, t, st.colors), { labels: 0.55 }];
+      return [st.lights_off && activeTab === "settings" ? {} : previewFrame(light, t, st.colors, userPresses), { labels: 0.55 }];
   }
 }
 const dimmed = () => Object.fromEntries(DATA.keys.map((k) => [k.led, [26, 28, 36]]));
@@ -340,14 +353,24 @@ $("#lights").addEventListener("click", toggleLights);
 // -- tabs ----------------------------------------------------------------------
 let activeTab = "light";
 $(".bottom-nav").innerHTML = $(".nav").innerHTML;
+function updateHint() {
+  let hint = HINTS[activeTab];
+  if (activeTab === "light") {
+    if (REACTIVE.has(light.mode)) hint = "this effect reacts to typing · click keys to try it";
+    else if (light.mode === DATA.customMode) hint = "your per-key design · edit it in Per-key";
+  }
+  $("#stage-hint").textContent = hint;
+  $(".stage").classList.toggle("interactive", ["rgb", "remap", "macro"].includes(activeTab)
+    || (activeTab === "light" && REACTIVE.has(light.mode)));
+}
+
 function showTab(name) {
   activeTab = name;
   $$(".nav button, .bottom-nav button").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   $$(".panel").forEach((p) => p.classList.toggle("active", p.id === `tab-${name}`));
   $("#page-title").textContent = TABS[name][0];
   $("#page-sub").textContent = TABS[name][1];
-  $("#stage-hint").textContent = HINTS[name];
-  $(".stage").classList.toggle("interactive", ["rgb", "remap", "macro"].includes(name));
+  updateHint();
   history.replaceState(null, "", name === "light" ? location.pathname : `#${name}`);
 }
 $$(".nav button, .bottom-nav button").forEach((b) => b.addEventListener("click", () => showTab(b.dataset.tab)));
@@ -361,10 +384,19 @@ DATA.modes.filter((m) => m.mode !== 22 && m.mode !== 23).forEach((m) => {
   const b = document.createElement("button");
   b.className = "effect";
   b.dataset.mode = m.mode;
-  b.innerHTML = `<canvas></canvas><span>${m.mode === DATA.customMode ? "Your design" : m.name}</span>`;
+  const label = m.mode === DATA.customMode ? "Your design" : m.name;
+  b.innerHTML = `<canvas></canvas><span>${label}</span>${REACTIVE.has(m.mode) ? '<em class="tag">reacts to typing</em>' : ""}`;
   b.title = m.name;
-  b.addEventListener("click", () => { light.mode = m.mode; syncLight(); applyLightSoon(); });
+  b.addEventListener("click", () => {
+    if (m.mode === DATA.customMode && !Object.values(st.colors).some((c) => Math.max(...c) > 0)) {
+      toast("No design yet. Paint one here, then press Upload design.", "warn");
+      showTab("rgb");
+      return;
+    }
+    light.mode = m.mode; syncLight(); applyLightSoon();
+  });
   $("#gallery").append(b);
+  b.querySelector("canvas").style.aspectRatio = ASPECT;
   minis.push([m.mode, b.querySelector("canvas")]);
 });
 
@@ -394,6 +426,7 @@ function syncLight() {
   $$("#palette .swatch").forEach((b) => b.classList.toggle("active", Number(b.dataset.i) === light.color));
   $("#palette").style.opacity = m.attr & A.color ? 1 : 0.3;
   $("#palette").style.pointerEvents = m.attr & A.color ? "" : "none";
+  updateHint();
 }
 
 const applyLightSoon = debounce(() => {

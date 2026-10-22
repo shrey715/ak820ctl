@@ -69,3 +69,58 @@ def test_every_effect_preview_renders(mode):
 def test_fixed_colour_preview_uses_palette():
     frame = effects.frame(7, 5, 3, 0, keys.palette_index("red"), t=0)
     assert all(g == 0 and b == 0 for _, g, b in frame.values())
+
+
+def _lit(frame, threshold=40):
+    return {led for led, rgb in frame.items() if max(rgb) > threshold}
+
+
+ROW_OF = {led: row for _, _, led, row, _ in keys.PHYSICAL_KEYS}
+K = keys.LED_BY_CODE[keys.key_code("k")]
+
+
+def test_ejection_only_moves_the_pressed_row():
+    # long after the auto presses start, use a real press and look just after it
+    frame = effects.frame(4, 5, 3, 0, keys.RAINBOW, t=0.25, presses=[(K, 0.0)])
+    rows = {ROW_OF[led] for led in _lit(frame)}
+    assert ROW_OF[K] in rows
+    assert K not in _lit(frame)            # the wave has left the key itself
+    lit_k_row = {led for led in _lit(frame) if ROW_OF[led] == ROW_OF[K]}
+    us = [effects.POS[led][0] for led in lit_k_row]
+    k_u = effects.POS[K][0]
+    assert min(us) < k_u < max(us)         # it travels both ways
+
+
+def test_jiangshan_moves_the_whole_column():
+    frame = effects.frame(12, 5, 3, 0, keys.RAINBOW, t=0.25, presses=[(K, 0.0)])
+    assert len({ROW_OF[led] for led in _lit(frame)}) == 6
+
+
+def test_top_and_bottom_chunks_move_opposite_ways():
+    def centre(frame, rows):
+        lit = [effects.POS[l][0] for l in _lit(frame) if ROW_OF[l] in rows]
+        return sum(lit) / len(lit)
+    a = effects.frame(15, 5, 3, 0, keys.RAINBOW, t=1.5)
+    b = effects.frame(15, 5, 3, 0, keys.RAINBOW, t=1.8)
+    assert centre(b, {0, 1, 2}) > centre(a, {0, 1, 2})
+    assert centre(b, {3, 4, 5}) < centre(a, {3, 4, 5})
+
+
+def test_galloping_lights_one_row_at_a_time():
+    for t in (0.4, 1.1, 2.3, 3.7):
+        frame = effects.frame(19, 5, 3, 0, keys.RAINBOW, t=t)
+        assert len({ROW_OF[led] for led in _lit(frame)}) <= 1
+
+
+def test_kaleidoscope_rings_move_outward():
+    centre = min(effects.POS, key=lambda l: abs(effects.POS[l][0] - 0.5) + abs(effects.POS[l][1] - 0.5))
+    def ring_phase(t):
+        return effects.frame(6, 5, 3, 0, keys.RAINBOW, t=t)[centre]
+    # brightness at the centre oscillates: the pattern isn't static
+    assert ring_phase(0.0) != ring_phase(0.3)
+
+
+def test_cross_waves_come_from_both_edges():
+    frame = effects.frame(9, 5, 3, 0, keys.RAINBOW, t=0.65)  # waves just entered
+    us = [effects.POS[l][0] for l in _lit(frame)]
+    assert min(us) < 0.15 and max(us) > 0.85

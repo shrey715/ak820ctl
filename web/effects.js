@@ -31,11 +31,38 @@ function rand(n, salt = 0) {
 
 const brightnessScale = (level) => 0.18 + 0.82 * (level - 1) / 4;
 
-export function previewFrame({ mode, brightness, speed, direction, color }, t, custom = {}) {
+// Effects that react to typing. Previews feed them simulated key presses, plus
+// keys you click on the board.
+export const REACTIVE = new Set([4, 12]);
+const PRESS_EVERY = 0.9;
+const LEDS = Object.keys(POS).map(Number).sort((a, b) => a - b);
+
+export function autoPresses(t, keep = 3) {
+  const slot = Math.floor(t / PRESS_EVERY), out = [];
+  for (let s = Math.max(0, slot - keep + 1); s <= slot; s++)
+    out.push([LEDS[Math.floor(rand(s, 7) * LEDS.length) % LEDS.length], s * PRESS_EVERY]);
+  return out;
+}
+
+function pressWave(u, row, t, sp, presses, sameRow) {
+  let best = 0, hue = 0;
+  for (const [led, pt] of presses) {
+    const age = t - pt;
+    if (age < 0 || age >= 2.2 || !POS[led]) continue;
+    const [pu, , prow] = POS[led];
+    if (sameRow && prow !== row) continue;
+    const front = age * (0.35 + 0.25 * sp);
+    const k = clamp(1 - Math.abs(Math.abs(u - pu) - front) * 9) * (1 - age / 2.2);
+    if (k > best) { best = k; hue = pu + age * 0.15; }
+  }
+  return [best, hue];
+}
+
+export function previewFrame({ mode, brightness, speed, direction, color }, t, custom = {}, presses = []) {
   if (mode === DATA.customMode) {
     const b = brightnessScale(brightness);
     return Object.fromEntries(Object.entries(custom).map(([led, rgb]) =>
-      [led, rgb.map((c) => Math.round(c * b))]));
+      [led, rgb.map((c) => Math.floor(c * b))]));
   }
   const m = MODES[mode];
   if (!m || mode === 22 || mode === 23) return {};
@@ -43,34 +70,59 @@ export function previewFrame({ mode, brightness, speed, direction, color }, t, c
   const sp = m.attr & A.speed ? 0.25 + 0.3 * (speed - 1) : 0.5;
   const fixed = m.attr & A.color && color !== DATA.rainbow
     ? DATA.palette[color].rgb.map((c) => c / 255) : null;
-  const left = Boolean(m.attr & A.direction) && direction === 1;
+  const rev = Boolean(m.attr & A.direction) && direction === 1;
   const bscale = m.attr & A.brightness ? brightnessScale(brightness) : 1;
+  if (REACTIVE.has(mode)) presses = [...presses, ...autoPresses(t)];
   const out = {};
   for (const [ledStr, [u, v, row]] of Object.entries(POS)) {
     const led = Number(ledStr);
-    const uu = left ? 1 - u : u;
+    const uu = rev ? 1 - u : u;
     let hue = null, k = 1;
     switch (mode) {
       case 1: k = (0.5 + 0.5 * Math.sin(2 * Math.PI * (uu * 1.6 - t * sp))) ** 2; hue = u * 0.8 + t * 0.05; break;
       case 2: k = Math.max(0, Math.sin(2 * Math.PI * (t * sp * 0.6 + rand(led)))) ** 10; hue = rand(led, 1); break;
-      case 3: { const vv = left ? 1 - v : v; k = (0.5 + 0.5 * Math.sin(2 * Math.PI * (vv * 1.4 - t * sp))) ** 2; hue = v * 0.8 + t * 0.05; break; }
-      case 4: { const d = Math.abs(u - 0.5) * 2; k = (0.5 + 0.5 * Math.sin(2 * Math.PI * (d * 1.5 - t * sp))) ** 2; hue = d * 0.7 + t * 0.05; break; }
+      case 3: { const vv = rev ? 1 - v : v; k = (0.5 + 0.5 * Math.sin(2 * Math.PI * (vv * 1.4 - t * sp))) ** 2; hue = v * 0.8 + t * 0.05; break; }
+      case 4: [k, hue] = pressWave(u, row, t, sp, presses, true); break;  // bidirectional ejection, per row
       case 5: hue = t * sp * 0.15; break;
-      case 6: { const a = Math.atan2((v - 0.5) * 0.4, u - 0.5) / (2 * Math.PI); hue = a + Math.hypot(u - 0.5, v - 0.5) - t * sp * 0.25; k = 0.6 + 0.4 * Math.sin(2 * Math.PI * (a * 3 + t * sp * 0.5)); break; }
+      case 6: {  // kaleidoscope: rings from the centre outwards
+        const r = Math.hypot(u - 0.5, (v - 0.5) * 0.42) * 2;
+        k = (0.5 + 0.5 * Math.sin(2 * Math.PI * (r * 1.8 + (rev ? t : -t) * sp))) ** 2;
+        hue = r * 0.6 - t * 0.05; break;
+      }
       case 7: hue = u * 0.85; break;
       case 8: k = 0.5 - 0.5 * Math.cos(2 * Math.PI * t * sp * 0.4); hue = t * 0.03; break;
-      case 9: { const p = (t * sp * 0.5) % 1; k = Math.max(clamp(1 - Math.abs(uu - p) * 7), clamp(1 - Math.abs(v - p) * 5)); hue = p + u * 0.3; break; }
+      case 9: {  // cross operation: waves from both edges pass each other
+        const p = ((t * sp * 0.45) % 1.4) - 0.2;
+        const kl = clamp(1 - Math.abs(u - p) * 7), kr = clamp(1 - Math.abs(u - (1 - p)) * 7);
+        k = Math.max(kl, kr); hue = (kl >= kr ? 0 : 0.55) + t * 0.03; break;
+      }
       case 11: k = (0.5 - 0.5 * Math.cos(2 * Math.PI * (t * sp * 0.4 + rand(led)))) ** 2; hue = rand(led, 2); break;
-      case 12: hue = uu * 0.7 + v * 0.3 - t * sp * 0.25; if (fixed) k = 0.5 + 0.5 * Math.sin(2 * Math.PI * (uu + v * 0.5 - t * sp * 0.5)); break;
-      case 15: { const ph = 0.5 + 0.5 * Math.sin(2 * Math.PI * t * sp * 0.4); k = row < 3 ? ph : 1 - ph; hue = row < 3 ? 0 : 0.6; break; }
-      case 16: { const col = Math.round(u * 15); const pos = ((t * sp * 0.6 + rand(col, 3)) % 1.4) - 0.2; k = v <= pos + 0.1 ? clamp(1 - (pos - v) * 3) * clamp(1 + (pos - v) * 12) : 0; hue = rand(col, 4); break; }
+      case 12: [k, hue] = pressWave(u, row, t, sp, presses, false); break;  // jiangshan, whole column
+      case 15: {  // top three rows sweep right, bottom three sweep left
+        const p = ((t * sp * 0.4) % 1.5) - 0.25, c = row < 3 ? p : 1 - p;
+        k = clamp(1 - Math.max(0, Math.abs(u - c) - 0.12) * 10); hue = (row < 3 ? 0 : 0.6) + t * 0.02; break;
+      }
+      case 16: {  // sideways rain
+        k = 0;
+        for (let j = 0; j < 2; j++) {
+          const x = ((t * sp * 0.55 + rand(row * 3 + j, 11) * 1.4) % 1.4) - 0.2, d = x - uu;
+          if (d >= -0.03) {
+            const kk = clamp(1 - d * 5) * clamp(1 + d * 30);
+            if (kk > k) { k = kk; hue = rand(row * 3 + j, 12); }
+          }
+        }
+        break;
+      }
       case 17: { const a = Math.atan2((v - 0.5) * 0.4, u - 0.5); k = (0.5 + 0.5 * Math.cos(4 * a - t * sp * 3)) ** 3; hue = a / (2 * Math.PI) + t * 0.05; break; }
       case 18: { const y = 0.5 + 0.4 * Math.sin(2 * Math.PI * (uu - t * sp * 0.4)); k = clamp(1 - Math.abs(v - y) * 4); hue = uu; break; }
-      case 19: { const p = ((t * sp * 0.45) % 1.2) - 0.1; k = clamp(1 - Math.abs(uu - p) * 6); hue = p; break; }
+      case 19: {  // galloping horse: one row at a time, left to right
+        const cycle = (t * sp * 0.6) % 6, cur = Math.floor(cycle), prog = (cycle % 1) * 1.25;
+        k = row === cur && uu <= prog ? clamp(1 - (prog - uu) * 3) : 0; hue = row / 6 + t * 0.02; break;
+      }
     }
     const rgb = fixed ?? hsv(hue ?? u);
     const f = clamp(k) * bscale;
-    out[led] = rgb.map((c) => Math.round(c * 255 * f));
+    out[led] = rgb.map((c) => Math.floor(c * 255 * f));  // truncate like the Python side
   }
   return out;
 }

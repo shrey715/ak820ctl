@@ -71,8 +71,8 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .sidebar-foot a { display: inline-flex; gap: 0.4rem; align-items: center; color: var(--muted); }
 .sidebar-foot svg { width: 15px; height: 15px; }
 
-.main { padding: 1.4rem clamp(1rem, 3vw, 2.4rem) 3rem; min-width: 0; max-width: 1320px; width: 100%; }
-.topbar { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.2rem; }
+.main { padding: 1.4rem clamp(1rem, 3vw, 2.4rem) 3rem; min-width: 0; max-width: 1360px; width: 100%; margin: 0 auto; }
+.topbar { display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.2rem; }
 .topbar h1 { font-size: clamp(1.5rem, 2.4vw, 1.9rem); font-weight: 750; }
 .topbar p { margin: 0.15rem 0 0; }
 .top-actions { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
@@ -124,13 +124,13 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 
 /* ---------- welcome ---------- */
 .welcome {
-  display: flex; align-items: center; justify-content: space-between; gap: 1.5rem; flex-wrap: wrap;
-  padding: 1.4rem 1.6rem; margin-bottom: 1.2rem; border-radius: var(--radius);
+  display: flex; align-items: center; justify-content: space-between; gap: 1rem 1.5rem; flex-wrap: wrap;
+  padding: 1rem 1.3rem; margin-bottom: 1.2rem; border-radius: var(--radius);
   background: linear-gradient(120deg, rgba(255,61,119,0.14), rgba(139,92,246,0.14));
   border: 1px solid rgba(255, 255, 255, 0.1);
 }
-.welcome h2 { font-size: 1.25rem; margin-bottom: 0.3rem; }
-.welcome p { margin: 0.25rem 0; max-width: 60ch; }
+.welcome h2 { font-size: 1.1rem; margin-bottom: 0.2rem; }
+.welcome p { margin: 0.15rem 0; max-width: 70ch; font-size: 0.92rem; }
 .welcome-actions { display: flex; gap: 0.6rem; flex-wrap: wrap; }
 
 /* ---------- stage ---------- */
@@ -141,7 +141,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
     linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.008));
   border: 1px solid var(--line); box-shadow: var(--shadow); margin-bottom: 1.2rem;
 }
-#stage { display: block; width: 100%; aspect-ratio: 590 / 250; touch-action: none; }
+#stage { display: block; width: 100%; aspect-ratio: 2.3; max-height: min(40vh, 480px); margin: 0 auto; touch-action: none; }
 .stage.interactive #stage { cursor: crosshair; }
 .stage-hint { margin-top: 0.5rem; min-height: 1.1em; text-align: center; font-size: 0.78rem; color: var(--muted); }
 
@@ -149,7 +149,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .panel { display: none; animation: fade .25s ease; }
 .panel.active { display: block; }
 @keyframes fade { from { opacity: 0; transform: translateY(4px); } }
-.cards { display: grid; gap: 1rem; }
+.cards { display: grid; gap: 1rem; align-items: start; }
 .cards.two { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); }
 .cards.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .card {
@@ -233,7 +233,9 @@ input:focus { border-color: rgba(255,61,119,0.6); box-shadow: 0 0 0 4px rgba(255
 }
 .effect:hover { border-color: var(--line-2); transform: translateY(-1px); }
 .effect.active { border-color: transparent; box-shadow: 0 0 0 2px var(--accent), 0 10px 30px -10px rgba(255,61,119,0.55); }
-.effect canvas { width: 100%; aspect-ratio: 590 / 250; border-radius: 8px; background: #07080b; }
+.effect canvas { width: 100%; aspect-ratio: 2.3; border-radius: 8px; background: #07080b; }
+.effect { position: relative; }
+.effect .tag { position: absolute; top: 0.85rem; right: 0.85rem; font-style: normal; font-size: 0.62rem; font-weight: 600; letter-spacing: .02em; padding: 0.1rem 0.4rem; border-radius: 99px; background: rgba(255,61,119,0.85); color: white; }
 .effect span { padding: 0 0.15rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------- per-key ---------- */

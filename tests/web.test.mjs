@@ -30,3 +30,32 @@ eq(sent.slice(2, 4), ["aa 55 cc 33 07 17 04 03 00 07", "aa 55 cc 33 0b"], "custo
 eq([st.battery, st.powerName], [87, "on battery"], "status");
 console.log(fail ? `${fail} failures` : "all web checks passed", "| packets:", sent.length);
 if (fail) process.exit(1);
+
+// Parity: the web previews must match ak820/effects.py (same formulas, same truncation).
+{
+  const { execFileSync } = await import("node:child_process");
+  const K = DATA.keys.find((k) => k.label === "K").led;
+  const cases = [];
+  for (const m of DATA.modes) {
+    if ([22, 23, 24].includes(m.mode)) continue;
+    for (const t of [0.37, 2.9]) cases.push([m.mode, 4, 3, m.mode % 2, 7, t]);
+  }
+  cases.push([7, 5, 3, 0, 2, 1.0]);  // fixed palette colour
+  const py = JSON.parse(execFileSync("python3", ["-c", `
+import json, sys
+sys.path.insert(0, ${JSON.stringify(root)})
+from ak820 import effects
+cases = json.loads(sys.argv[1])
+print(json.dumps([{str(k): list(v) for k, v in effects.frame(*c[:5], t=c[5], presses=[(${K}, c[5] - 0.2)]).items()} for c in cases]))
+`, JSON.stringify(cases)]).toString());
+  let diffs = 0;
+  cases.forEach(([mode, b, s, d, c, t], i) => {
+    const js = fx.previewFrame({ mode, brightness: b, speed: s, direction: d, color: c }, t, {}, [[K, t - 0.2]]);
+    for (const [led, rgb] of Object.entries(py[i])) {
+      if (rgb.some((v, j) => Math.abs(v - js[led][j]) > 1)) { diffs++; if (diffs < 4) console.log("parity", mode, t, led, rgb, js[led]); }
+    }
+  });
+  if (diffs) { fail++; console.log(`FAIL preview parity: ${diffs} LEDs differ`); }
+  else console.log(`preview parity ok (${cases.length} cases)`);
+}
+if (fail) process.exit(1);
