@@ -674,6 +674,9 @@ $("#apply-macro").addEventListener("click", () => {
 
 // -- music -----------------------------------------------------------------------
 const music = { running: false };
+// Worker-driven clock: main-thread timers stall when the tab is in the background.
+const ticker = new Worker("ticker.js");
+ticker.onmessage = () => music.running && musicTick();
 seg("music-source", () => {});
 seg("music-style", (v) => { if (music.renderer) music.renderer.style = v; });
 seg("music-color", (v) => { if (music.renderer) music.renderer.color = v === "brush" ? brush : null; });
@@ -704,7 +707,7 @@ async function startMusic() {
     if (kb) await kb.enterLiveMode();
     music.running = true;
     stream.getTracks().forEach((t) => t.addEventListener("ended", stopMusic));
-    music.timer = setInterval(musicTick, 1000 / 30);
+    ticker.postMessage(1000 / 30);
     $("#music-toggle span").textContent = "Stop";
     $("#music-toggle").classList.replace("primary", "danger");
     $("#music-state").textContent = kb ? "running" : "running · screen only";
@@ -743,7 +746,7 @@ function drawBars(levels) {
 function stopMusic() {
   if (!music.running) return;
   music.running = false;
-  clearInterval(music.timer);
+  ticker.postMessage(0);
   music.stream?.getTracks().forEach((t) => t.stop());
   music.ctx?.close();
   musicFrame = {};
@@ -754,6 +757,12 @@ function stopMusic() {
   if (kb && !st.lights_off) run("Lighting restored", () => control.lightsOn(kb, st), { quiet: true });
 }
 $("#music-toggle").addEventListener("click", () => (music.running ? stopMusic() : startMusic()));
+
+// Closing the page stops the stream and the keyboard falls back to its stored
+// lighting, so ask first while something is streaming.
+window.addEventListener("beforeunload", (e) => {
+  if (music.running || liveRgb) e.preventDefault();
+});
 
 // -- settings --------------------------------------------------------------------
 setSeg("sleep", st.settings.sleep);

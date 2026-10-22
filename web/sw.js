@@ -1,7 +1,7 @@
 // Offline cache for the app shell, so the installed web app opens without a network.
-const CACHE = "ak820ctl-v3";
+const CACHE = "ak820ctl-v4";
 const SHELL = ["./", "index.html", "style.css", "app.js", "protocol.js", "effects.js", "data.js",
-  "icon.svg", "manifest.webmanifest"];
+  "icon.svg", "manifest.webmanifest", "ticker.js"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)));
