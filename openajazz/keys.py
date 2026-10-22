@@ -167,7 +167,7 @@ def effect_mode(name: str) -> int:
     hits = [m for m, (title, _) in LIGHT_MODES.items() if title.lower().startswith(n)]
     if len(hits) == 1:
         return hits[0]
-    raise KeyError(f"unknown effect '{name}' (try `ak820ctl modes`)")
+    raise KeyError(f"unknown effect '{name}' (try `openajazz modes`)")
 
 
 def palette_index(name: str) -> int:

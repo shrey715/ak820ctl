@@ -5,8 +5,8 @@ import pytest
 
 np = pytest.importorskip("numpy")
 
-from ak820 import keys  # noqa: E402
-from ak820.music import BANDS, FFT_SIZE, RATE, Analyzer, Renderer  # noqa: E402
+from openajazz import keys  # noqa: E402
+from openajazz.music import BANDS, FFT_SIZE, RATE, Analyzer, Renderer  # noqa: E402
 
 
 def tone(freq: float, amplitude: float = 0.8) -> bytes:

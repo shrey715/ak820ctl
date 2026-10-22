@@ -1,5 +1,5 @@
 // Effect previews, pattern fills and the music renderer, ported from
-// ak820/effects.py, ak820/patterns.py and ak820/music.py.
+// openajazz/effects.py, openajazz/patterns.py and openajazz/music.py.
 // Effect formulas adapted from prasoondev/ajazz-linux (MIT, (c) 2026 prasoon).
 import { DATA } from "./data.js";
 

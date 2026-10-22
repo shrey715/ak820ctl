@@ -28,6 +28,6 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
-      - name: web/data.js matches ak820/keys.py
+      - name: web/data.js matches openajazz/keys.py
         run: python tools/gen_web_data.py --check
       - run: node tests/web.test.mjs

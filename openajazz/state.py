@@ -1,7 +1,7 @@
 """Local copy of what we last sent to the keyboard.
 
 The firmware has no read-back command that we know of, so the TUI keeps its
-own record in $XDG_CONFIG_HOME/ak820ctl to start where you left off.
+own record in $XDG_CONFIG_HOME/openajazz to start where you left off.
 """
 
 from __future__ import annotations
@@ -13,7 +13,9 @@ from pathlib import Path
 
 from . import keys
 
-CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "ak820ctl"
+_XDG = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+CONFIG_DIR = _XDG / "openajazz"
+OLD_CONFIG_DIR = _XDG / "ak820ctl"  # the project's name before 0.4
 STATE_FILE = CONFIG_DIR / "state.json"
 PRESET_DIR = CONFIG_DIR / "presets"
 
@@ -32,7 +34,15 @@ def default_state() -> dict:
     }
 
 
+def _migrate():
+    """Carry settings and presets over from the old ak820ctl folder, once."""
+    if OLD_CONFIG_DIR.is_dir() and not CONFIG_DIR.exists():
+        import shutil
+        shutil.copytree(OLD_CONFIG_DIR, CONFIG_DIR)
+
+
 def load() -> dict:
+    _migrate()
     data = default_state()
     try:
         saved = json.loads(STATE_FILE.read_text())

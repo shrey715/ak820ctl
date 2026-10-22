@@ -1,7 +1,7 @@
 name: publish
 
 # Runs on every push to main. Releases only when the version in
-# ak820/__init__.py isn't on PyPI yet, so bumping the version = a release:
+# openajazz/__init__.py isn't on PyPI yet, so bumping the version = a release:
 # PyPI upload (trusted publishing, no token stored anywhere), an AppImage,
 # and a GitHub release with install notes. The web app deploys separately
 # through Vercel's git integration.
@@ -38,9 +38,9 @@ jobs:
       - name: check whether this version is already on pypi
         id: version
         run: |
-          v=$(python -c "import re; print(re.search(r'__version__ = \"(.+?)\"', open('ak820/__init__.py').read()).group(1))")
+          v=$(python -c "import re; print(re.search(r'__version__ = \"(.+?)\"', open('openajazz/__init__.py').read()).group(1))")
           echo "version=$v" >> "$GITHUB_OUTPUT"
-          if curl -sfo /dev/null "https://pypi.org/pypi/ak820ctl/$v/json"; then
+          if curl -sfo /dev/null "https://pypi.org/pypi/openajazz/$v/json"; then
             echo "new=false" >> "$GITHUB_OUTPUT"
             echo "$v is already on pypi, nothing to publish"
           else
@@ -71,27 +71,31 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           V: ${{ steps.version.outputs.version }}
         run: |
-          cat > notes.md <<EOF
+          # this version's section of CHANGELOG.md goes first
+          awk -v v="## $V" '$0 == v {on=1; next} /^## / && on {exit} on' CHANGELOG.md > changes.md
+          { echo "## What's new"; cat changes.md; echo; } > notes.md
+          cat >> notes.md <<EOF
           ## Get it
 
-          **No install:** open **https://ak820ctl.vercel.app** in Chrome, Edge or Opera on a computer.
+          **No install:** open **https://openajazz.vercel.app** in Chrome, Edge or Opera on a computer.
 
           **Terminal (CLI + TUI):**
           \`\`\`sh
-          pipx install 'ak820ctl[music]'      # or
-          uv tool install 'ak820ctl[music]'   # or
-          pip install --user 'ak820ctl[music]'
+          pipx install 'openajazz[music]'      # or
+          uv tool install 'openajazz[music]'   # or
+          pip install --user 'openajazz[music]'
           \`\`\`
 
           **AppImage (Linux, nothing else needed):**
           \`\`\`sh
-          curl -LO https://github.com/${{ github.repository }}/releases/download/v$V/ak820ctl-$V-x86_64.AppImage
-          chmod +x ak820ctl-$V-x86_64.AppImage && ./ak820ctl-$V-x86_64.AppImage
+          curl -LO https://github.com/${{ github.repository }}/releases/download/v$V/openajazz-$V-x86_64.AppImage
+          chmod +x openajazz-$V-x86_64.AppImage && ./openajazz-$V-x86_64.AppImage
           \`\`\`
 
-          On Linux, run \`ak820ctl udev --install\` once so you don't need sudo.
+          On Linux, run \`openajazz udev --install\` once so you don't need sudo.
           Unofficial, not affiliated with AJAZZ.
 
           EOF
           sed -i 's/^          //' notes.md
+          cat notes.md
           gh release create "v$V" release/* --title "v$V" --notes-file notes.md --generate-notes

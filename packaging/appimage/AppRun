@@ -1,5 +1,5 @@
 #!/bin/bash
-# AppImage entry point: run ak820ctl with the bundled Python.
+# AppImage entry point: run openajazz with the bundled Python.
 if [ -z "${APPDIR}" ]; then
     self=$(readlink -f -- "$0")
     export APPDIR="${self%/*}"
@@ -20,4 +20,4 @@ if [ ! -t 0 ] && [ $# -eq 0 ] && [ -z "${AK820_IN_TERMINAL}" ]; then
     done
 fi
 
-exec "${APPDIR}/opt/python3.12/bin/python3.12" -s -m ak820 "$@"
+exec "${APPDIR}/opt/python3.12/bin/python3.12" -s -m openajazz "$@"

@@ -1,8 +1,8 @@
 import pytest
 
-from ak820 import keys
-from ak820.cli import parse_macro_events
-from ak820.protocol import MAGIC, Keyboard, encode_delay
+from openajazz import keys
+from openajazz.cli import parse_macro_events
+from openajazz.protocol import MAGIC, Keyboard, encode_delay
 
 
 def capture():

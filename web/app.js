@@ -18,9 +18,9 @@ const NAMED = {
   white: [255, 255, 255], off: [0, 0, 0],
 };
 const PATTERN_LABELS = {
-  solid: "Solid fill", "rainbow-horizontal": "Rainbow →", "rainbow-vertical": "Rainbow ↓",
-  "rainbow-diagonal": "Rainbow ↘", "gradient-horizontal": "Gradient →",
-  "gradient-vertical": "Gradient ↓", "highlight-gaming": "WASD highlight", random: "Random",
+  solid: "Solid fill", "rainbow-horizontal": "Rainbow across", "rainbow-vertical": "Rainbow down",
+  "rainbow-diagonal": "Rainbow diagonal", "gradient-horizontal": "Gradient across",
+  "gradient-vertical": "Gradient down", "highlight-gaming": "WASD highlight", random: "Random",
 };
 const QUICK_TARGETS = ["esc", "capslock", "lctrl", "backspace", "delete", "volup", "voldown",
   "mute", "playpause", "next", "prev", "calculator", "mycomputer", "f13"];
@@ -33,28 +33,34 @@ const TABS = {
   settings: ["Settings", "Sleep timer, response time and housekeeping."],
 };
 const HINTS = {
-  light: "live preview · approximate", rgb: "click or drag to paint · ctrl+z undo",
-  remap: "click the key you want to change", macro: "click the key that should run the macro",
+  light: "Live preview, approximate", rgb: "Click or drag to paint, ctrl+z to undo",
+  remap: "Click the key you want to change", macro: "Click the key that should run the macro",
   music: "", settings: "",
 };
 
 // -- helpers -----------------------------------------------------------------
 const hex = (rgb) => "#" + rgb.map((c) => c.toString(16).padStart(2, "0")).join("");
 const fromHex = (h) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16));
-const keyLabel = (layer, code) => (layer ? "Fn+" : "") + (LEGEND[code] ?? codeName(code));
+const ARROW_WORDS = { "↑": "Up", "↓": "Down", "←": "Left", "→": "Right" };
+const keyLabel = (layer, code) => {
+  const legend = LEGEND[code] ?? codeName(code);
+  return (layer ? "Fn+" : "") + (ARROW_WORDS[legend] ?? legend);
+};
+const icon = (id, size = "sm") => `<svg class="i ${size}"><use href="#i-${id}"/></svg>`;
 const debounce = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
 function toast(msg, kind = "ok") {
   const el = document.createElement("div");
   el.className = `toast ${kind}`;
-  el.textContent = msg;
+  el.innerHTML = icon(kind === "ok" ? "check" : "alert") + "<span></span>";
+  el.lastChild.textContent = msg;
   $("#toasts").append(el);
   setTimeout(() => el.remove(), kind === "error" ? 7000 : 2800);
 }
 
 function setSync(text, cls = "") {
   const el = $("#sync");
-  el.textContent = text;
+  el.lastElementChild.textContent = text;
   el.className = "sync " + cls;
 }
 
@@ -76,19 +82,19 @@ function confirmDialog(title, text) {
 function run(label, fn, { after, quiet = false } = {}) {
   if (!kb) {
     if (!quiet) toast("Connect the keyboard first, or try the demo.", "warn");
-    else setSync("preview only, not connected");
+    else setSync("Preview only");
     return Promise.resolve();
   }
-  setSync("saving…");
+  setSync("Saving…");
   queue = queue.then(async () => {
     try {
       await fn();
       saveState(st);
-      setSync(kb.simulated ? "✓ demo, nothing sent" : "✓ synced", "ok");
+      setSync(kb.simulated ? "Demo, nothing sent" : "Saved", "ok");
       if (!quiet) toast(label);
       after?.();
     } catch (e) {
-      setSync("✗ " + e.message, "err");
+      setSync(e.message, "err");
       toast(`${label}: ${e.message}`, "error");
     }
   });
@@ -206,11 +212,28 @@ function drawBoard(canvas, colors, { marks = {}, labels = 0.85, glow = true, pla
       ctx.globalAlpha = labels;
       ctx.fillStyle = v > 0.02 && lum > 0.55 ? "rgba(10,10,14,0.85)" : "rgba(240,242,248,0.92)";
       ctx.font = `600 ${Math.max(8, (k.label.length > 3 ? 7.6 : 9.4) * s)}px Inter, system-ui, sans-serif`;
-      ctx.fillText(k.label, tx + tw / 2, ty + th / 2 + 0.4 * s);
+      if (ARROW_WORDS[k.label]) drawArrowLegend(ctx, k.label, tx + tw / 2, ty + th / 2, 4.2 * s);
+      else ctx.fillText(k.label, tx + tw / 2, ty + th / 2 + 0.4 * s);
       ctx.globalAlpha = 1;
     }
   }
   return { s, ox, oy };
+}
+
+// Arrow-key legends as strokes, not text glyphs.
+function drawArrowLegend(ctx, legend, cx, cy, r) {
+  const angle = { "→": 0, "↓": Math.PI / 2, "←": Math.PI, "↑": -Math.PI / 2 }[legend];
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(angle);
+  ctx.strokeStyle = ctx.fillStyle;
+  ctx.lineWidth = r * 0.32;
+  ctx.lineCap = ctx.lineJoin = "round";
+  ctx.beginPath();
+  ctx.moveTo(-r, 0); ctx.lineTo(r, 0);
+  ctx.moveTo(r * 0.35, -r * 0.62); ctx.lineTo(r, 0); ctx.lineTo(r * 0.35, r * 0.62);
+  ctx.stroke();
+  ctx.restore();
 }
 
 function keyAt(canvas, e) {
@@ -273,18 +296,17 @@ const dimmed = () => Object.fromEntries(DATA.keys.map((k) => [k.led, [26, 28, 36
 async function attach(next) {
   if (kb && kb !== next) await kb.close();
   kb = next;
-  const dev = $("#device");
-  dev.className = "device " + (kb.simulated ? "sim" : "on");
+  $("#status").className = "status " + (kb.simulated ? "sim" : "on");
   $("#device-name").textContent = kb.simulated ? "Demo mode" : kb.name;
   $("#connect span").textContent = kb.simulated ? "Connect" : "Change";
   $("#welcome").classList.add("hidden");
-  setSync(kb.simulated ? "demo, nothing is sent" : "connected", kb.simulated ? "" : "ok");
+  setSync(kb.simulated ? "Demo, nothing is sent" : "", "");
   pollStatus();
 }
 
 function detach(msg) {
   kb = null;
-  $("#device").className = "device";
+  $("#status").className = "status";
   $("#device-name").textContent = "Not connected";
   $("#battery").classList.add("hidden");
   $("#connect span").textContent = "Connect";
@@ -299,7 +321,7 @@ async function connect() {
     if (k) attach(k);
   } catch (e) {
     toast(e.name === "NotAllowedError" || e.name === "SecurityError" || e.name === "InvalidStateError"
-      ? "Couldn't open the keyboard. On Linux, add the udev rule once (Settings → About)."
+      ? "Couldn't open the keyboard. On Linux, add the udev rule once (see About in Settings)."
       : e.message, "error");
   }
 }
@@ -318,12 +340,12 @@ async function pollStatus() {
       bat.classList.toggle("low", s.battery <= 20);
       bat.classList.toggle("mid", s.battery > 20 && s.battery <= 50);
       bat.classList.toggle("charging", s.onCharger);
-      bat.querySelector("i").style.width = `calc(${s.battery}% - 2px)`;
+      bat.querySelector(".fill").setAttribute("width", (18.3 * s.battery / 100).toFixed(1));
       bat.querySelector("b").textContent = `${s.battery}%`;
       bat.title = s.powerName;
     } else {
       bat.classList.add("hidden");
-      setSync("keyboard asleep or off");
+      setSync("Keyboard asleep or off");
     }
   } catch {
     if (!kb.simulated) detach("Lost the keyboard.");
@@ -335,7 +357,7 @@ if (hidSupported()) {
   navigator.hid.addEventListener("disconnect", (e) => { if (kb?.device === e.device) detach("Keyboard disconnected."); });
   Keyboard.reconnect({ log }).then((k) => (k ? attach(k) : detach())).catch(() => detach());
   if (/Linux/.test(navigator.userAgent) && !/Android/.test(navigator.userAgent))
-    $("#welcome-note").textContent = "Linux: add the udev rule once so the browser may open the keyboard (Settings → About).";
+    $("#welcome-note").textContent = "Linux: add the udev rule once so the browser may open the keyboard (see About in Settings).";
 } else {
   detach();
   $("#welcome-note").innerHTML = "This browser can't talk to USB keyboards (no WebHID). Use <b>Chrome, Edge or Opera on a computer</b>. Phones, Safari and Firefox aren't supported yet, but the demo works anywhere.";
@@ -343,7 +365,7 @@ if (hidSupported()) {
 }
 
 // lights on/off
-function showLights() { $("#lights").classList.toggle("on", !st.lights_off); }
+function showLights() { $("#lights").setAttribute("aria-pressed", String(!st.lights_off)); }
 function toggleLights() {
   const off = st.lights_off;
   run(off ? "Lights on" : "Lights off", () => (off ? control.lightsOn(kb, st) : control.lightsOff(kb, st)), { after: showLights });
@@ -356,8 +378,8 @@ $(".bottom-nav").innerHTML = $(".nav").innerHTML;
 function updateHint() {
   let hint = HINTS[activeTab];
   if (activeTab === "light") {
-    if (REACTIVE.has(light.mode)) hint = "this effect reacts to typing · click keys to try it";
-    else if (light.mode === DATA.customMode) hint = "your per-key design · edit it in Per-key";
+    if (REACTIVE.has(light.mode)) hint = "This effect reacts to typing. Click keys to try it.";
+    else if (light.mode === DATA.customMode) hint = "Your per-key design. Edit it in Per-key.";
   }
   $("#stage-hint").textContent = hint;
   $(".stage").classList.toggle("interactive", ["rgb", "remap", "macro"].includes(activeTab)
@@ -464,7 +486,7 @@ function paintKey(key, drag) {
 }
 
 function dirty(on = true) {
-  $("#dirty").textContent = on ? "● not uploaded yet" : "";
+  $("#dirty").textContent = on ? "Not uploaded yet" : "";
   if (on && liveRgb && kb) kb.sendFrame(paint).catch(() => {});
 }
 function snapshot() {
@@ -509,8 +531,11 @@ for (const key of Object.keys(DATA.patterns)) {
 $("#clear-sel").addEventListener("click", () => { selected.clear(); $("#sel-count").textContent = ""; });
 
 // presets
-const PRESETS = "ak820ctl-presets";
-const presets = () => { try { return JSON.parse(localStorage.getItem(PRESETS) || "{}"); } catch { return {}; } };
+const PRESETS = "openajazz-presets";
+const presets = () => {
+  try { return JSON.parse(localStorage.getItem(PRESETS) || localStorage.getItem("ak820ctl-presets") || "{}"); }
+  catch { return {}; }
+};
 function savePresets(all) { try { localStorage.setItem(PRESETS, JSON.stringify(all)); } catch { /* storage blocked */ } }
 function refreshPresets() {
   const box = $("#preset-list");
@@ -522,10 +547,10 @@ function refreshPresets() {
     const pick = (i) => (vals.length ? `rgb(${vals[Math.floor(i * (vals.length - 1))]})` : "#222");
     const chip = document.createElement("span");
     chip.className = "preset";
-    chip.innerHTML = `<i style="background:linear-gradient(135deg, ${pick(0)}, ${pick(0.5)}, ${pick(1)})"></i><span></span><button title="delete">×</button>`;
+    chip.innerHTML = `<i style="background:linear-gradient(135deg, ${pick(0)}, ${pick(0.5)}, ${pick(1)})"></i><span></span><button title="Delete">${icon("x", "xs")}</button>`;
     chip.querySelector("span").textContent = name;
     chip.addEventListener("click", (e) => {
-      if (e.target.tagName === "BUTTON") {
+      if (e.target.closest("button")) {
         const a = presets(); delete a[name]; savePresets(a); refreshPresets(); return;
       }
       snapshot(); Object.assign(paint, colors); dirty();
@@ -545,7 +570,7 @@ $("#save-preset").addEventListener("click", () => {
 $("#export").addEventListener("click", () => {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([JSON.stringify(paint, null, 1)], { type: "application/json" }));
-  a.download = "ak820-design.json";
+  a.download = "openajazz-design.json";
   a.click();
 });
 $("#import").addEventListener("change", async (e) => {
@@ -576,8 +601,8 @@ $("#upload").addEventListener("click", () => {
 
 // -- remap ----------------------------------------------------------------------
 let remapSrc = null;
-for (const n of Object.keys(DATA.hid)) $("#targets").append(new Option(`key · ${n}`, n));
-for (const n of Object.keys(DATA.media)) $("#targets").append(new Option(`media · ${n}`, n));
+for (const n of Object.keys(DATA.hid)) $("#targets").append(new Option(`key: ${n}`, n));
+for (const n of Object.keys(DATA.media)) $("#targets").append(new Option(`media: ${n}`, n));
 for (const n of QUICK_TARGETS) {
   const b = document.createElement("button");
   b.className = "chip";
@@ -596,11 +621,11 @@ function remapMarks() {
   return marks;
 }
 
-function row(capText, what, btnText, onClick) {
+function row(capText, what, btnText, onClick, whatIcon = null) {
   const li = document.createElement("li");
-  li.innerHTML = `<span class="keycap small"></span><span class="what"></span><button class="btn ghost sm"></button>`;
+  li.innerHTML = `<span class="keycap small"></span><span class="what">${whatIcon ? icon(whatIcon, "xs") : ""}<span></span></span><button class="btn ghost sm"></button>`;
   li.children[0].textContent = capText;
-  li.children[1].textContent = what;
+  li.children[1].lastChild.textContent = what;
   li.children[2].textContent = btnText;
   li.children[2].addEventListener("click", onClick);
   return li;
@@ -613,14 +638,15 @@ function refreshRemaps() {
   if (!entries.length) ul.innerHTML = '<li class="empty">Nothing remapped. Click a key on the board.</li>';
   for (const [key, dst] of entries) {
     const [lay, src] = key.split(":").map(Number);
-    ul.append(row(keyLabel(lay, src), "→ " + codeName(dst), "Restore",
-      () => run(`${keyLabel(lay, src)} restored`, () => control.restoreKey(kb, st, lay, src), { after: keysChanged })));
+    ul.append(row(keyLabel(lay, src), codeName(dst), "Restore",
+      () => run(`${keyLabel(lay, src)} restored`, () => control.restoreKey(kb, st, lay, src), { after: keysChanged }),
+      "arrow-right"));
   }
   const cap = $("#remap-cap");
   cap.textContent = remapSrc == null ? "?" : keyLabel(remapLayer(), remapSrc);
   cap.classList.toggle("empty", remapSrc == null);
   const cur = remapSrc == null ? null : st.remaps[`${remapLayer()}:${remapSrc}`];
-  $("#remap-target").placeholder = cur != null ? `now → ${codeName(cur)}` : "search a function: esc, volup, f13…";
+  $("#remap-target").placeholder = cur != null ? `currently ${codeName(cur)}` : "search a function: esc, volup, f13…";
 }
 $("#remap-fn").addEventListener("change", refreshRemaps);
 $("#apply-remap").addEventListener("click", () => {
@@ -628,7 +654,7 @@ $("#apply-remap").addEventListener("click", () => {
   let dst;
   try { dst = targetCode($("#remap-target").value); } catch (e) { toast(e.message, "error"); return; }
   const layer = remapLayer(), src = remapSrc;
-  run(`${keyLabel(layer, src)} → ${codeName(dst)}`, () => control.remap(kb, st, layer, src, dst), { after: keysChanged });
+  run(`${keyLabel(layer, src)} now does ${codeName(dst)}`, () => control.remap(kb, st, layer, src, dst), { after: keysChanged });
 });
 $("#restore-key").addEventListener("click", () => {
   if (remapSrc == null) { toast("Click a key on the board first.", "warn"); return; }
@@ -666,7 +692,7 @@ function refreshMacros() {
   if (!entries.length) ul.innerHTML = '<li class="empty">No macros yet.</li>';
   for (const [key, m] of entries) {
     const [lay, src] = key.split(":").map(Number);
-    ul.append(row(keyLabel(lay, src), `${m.events}${m.repeat > 1 ? `  ×${m.repeat}` : ""}`, "Remove",
+    ul.append(row(keyLabel(lay, src), `${m.events}${m.repeat > 1 ? `  (repeat ${m.repeat})` : ""}`, "Remove",
       () => run(`Macro on ${keyLabel(lay, src)} removed`, () => control.restoreKey(kb, st, lay, src), { after: keysChanged })));
   }
   const cap = $("#macro-cap");
@@ -682,7 +708,8 @@ function previewMacro() {
     for (const [code, release, delay] of parseMacroEvents($("#macro-events").value)) {
       const ev = document.createElement("span");
       ev.className = "ev " + (release ? "up" : "down");
-      ev.textContent = `${release ? "↑" : "↓"} ${codeName(code)}`;
+      ev.innerHTML = icon(release ? "arrow-up" : "arrow-down", "xs") + "<span></span>";
+      ev.lastChild.textContent = codeName(code);
       const gap = document.createElement("span");
       gap.className = "ev-gap";
       gap.textContent = `${delay}ms`;
@@ -743,7 +770,7 @@ async function startMusic() {
     ticker.postMessage(1000 / 30);
     $("#music-toggle span").textContent = "Stop";
     $("#music-toggle").classList.replace("primary", "danger");
-    $("#music-state").textContent = kb ? "running" : "running · screen only";
+    $("#music-state").textContent = kb ? "running" : "running, screen only";
   } catch (e) {
     if (e.name !== "NotAllowedError") toast(`Music sync: ${e.message}`, "error");
   }

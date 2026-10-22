@@ -31,7 +31,7 @@ eq([st.battery, st.powerName], [87, "on battery"], "status");
 console.log(fail ? `${fail} failures` : "all web checks passed", "| packets:", sent.length);
 if (fail) process.exit(1);
 
-// Parity: the web previews must match ak820/effects.py (same formulas, same truncation).
+// Parity: the web previews must match openajazz/effects.py (same formulas, same truncation).
 {
   const { execFileSync } = await import("node:child_process");
   const K = DATA.keys.find((k) => k.label === "K").led;
@@ -44,7 +44,7 @@ if (fail) process.exit(1);
   const py = JSON.parse(execFileSync("python3", ["-c", `
 import json, sys
 sys.path.insert(0, ${JSON.stringify(root)})
-from ak820 import effects
+from openajazz import effects
 cases = json.loads(sys.argv[1])
 print(json.dumps([{str(k): list(v) for k, v in effects.frame(*c[:5], t=c[5], presses=[(${K}, c[5] - 0.2)]).items()} for c in cases]))
 `, JSON.stringify(cases)]).toString());

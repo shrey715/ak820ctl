@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 import time
 
@@ -202,7 +203,7 @@ def cmd_light(args):
     if mode not in keys.LIGHT_MODES:
         console.print(f"[yellow]Mode {mode} isn't in the vendor list; sending anyway.[/]")
     if mode in (keys.MUSIC_MODE, keys.SCREEN_MODE):
-        raise ValueError("music/screen modes are driven by the PC; use `ak820ctl music`")
+        raise ValueError("music/screen modes are driven by the PC; use `openajazz music`")
     with Session(args) as (kb, st):
         prev = st["light"]
         light = {"mode": mode,
@@ -253,10 +254,34 @@ def cmd_custom(args):
     ok(f"custom per-key colours stored ({len(colors)} keys)")
 
 
+def _stop_like_ctrl_c(*_):
+    # `music --stop` and systemd send SIGTERM: stop cleanly and restore the lighting
+    raise KeyboardInterrupt
+
+
 def cmd_music(args):
+    from . import service
+
+    if args.stop:
+        stopped = service.stop_background()
+        ok("music sync stopped, lighting restored" if stopped else "music sync wasn't running")
+        return
+    if args.background:
+        argv = service.music_argv(args.style, args.color, args.sensitivity, args.fps, args.device,
+                                    args.dry_run)
+        try:
+            pid = service.start_background(argv)
+        except RuntimeError as e:
+            raise ValueError(str(e))
+        ok(f"music sync running in the background (pid {pid}). "
+           "Close the terminal whenever; stop it with [bold]openajazz music --stop[/]")
+        return
+
+    import signal
     from .music import AudioError, BANDS, Visualizer
 
     color = parse_color(args.color) if args.color else None
+    signal.signal(signal.SIGTERM, _stop_like_ctrl_c)
     with Session(args) as (kb, st):
         latest = {"frame": {}, "levels": [0.0] * BANDS}
 
@@ -270,14 +295,20 @@ def cmd_music(args):
             viz.start()
         except AudioError as e:
             raise ValueError(str(e))
-        console.print(f"[bold]music sync[/] · {args.style} · Ctrl-C to stop")
         try:
-            with Live(console=console, refresh_per_second=15) as live:
+            if args.quiet:
+                print(f"music sync running ({args.style})", flush=True)
                 while viz.running:
-                    bars = Text("".join(" ▁▂▃▄▅▆▇█"[min(8, int(l * 8.99))]
-                                        for l in latest["levels"]), style="bold magenta")
-                    live.update(Group(render_keyboard(latest["frame"], title="live"), bars))
-                    time.sleep(1 / 15)
+                    time.sleep(0.5)
+            else:
+                console.print(f"[bold]music sync[/] · {args.style} · Ctrl-C to stop "
+                              "[dim](or run with --background)[/]")
+                with Live(console=console, refresh_per_second=15) as live:
+                    while viz.running:
+                        bars = Text("".join(" ▁▂▃▄▅▆▇█"[min(8, int(l * 8.99))]
+                                            for l in latest["levels"]), style="bold magenta")
+                        live.update(Group(render_keyboard(latest["frame"], title="live"), bars))
+                        time.sleep(1 / 15)
         except KeyboardInterrupt:
             pass
         finally:
@@ -286,7 +317,30 @@ def cmd_music(args):
             raise ValueError(str(errors[0]))
         if not st.get("lights_off"):
             control.lights_on(kb, st)  # put the stored lighting back right away
-    ok("music sync stopped, lighting restored")
+    if not args.quiet:
+        ok("music sync stopped, lighting restored")
+
+
+def cmd_autostart(args):
+    from . import service
+
+    try:
+        if args.what == "music":
+            service.stop_background()  # one stream at a time
+            argv = service.music_argv(args.style, args.color, args.sensitivity, args.fps,
+                                      args.device)
+            service.enable_autostart(argv)
+            ok(f"music sync now starts at login, and it's running now "
+               f"([dim]{service.UNIT_PATH}[/]). Turn off with [bold]openajazz autostart off[/]")
+        elif args.what == "off":
+            ok("autostart removed" if service.disable_autostart() else "autostart wasn't on")
+        else:
+            bg = service.running_pid()
+            console.print(f"autostart: {service.autostart_status()}")
+            console.print(f"background run: {'pid ' + str(bg) if bg else 'none'}")
+    except (RuntimeError, subprocess.CalledProcessError) as e:
+        detail = getattr(e, "stderr", "") or str(e)
+        raise ValueError(detail.strip())
 
 
 # -- settings / keys --------------------------------------------------------
@@ -371,19 +425,20 @@ def cmd_raw(args):
 
 
 UDEV_RULE = """\
-# AJAZZ AK820 Max Plus: let the logged-in user open the vendor config interface
-# (USB interface 0) only. The typing interfaces stay root-only, so nothing can
-# read keystrokes through this rule. Wired 1a2c:a036, 2.4G dongle 1a2c:8fff.
+# openajazz: let the logged-in user open the config interface (USB interface 0)
+# of supported AJAZZ keyboards. The typing interfaces stay root-only, so nothing
+# can read keystrokes through this rule.
+#   AK820 Max Plus: wired 1a2c:a036, 2.4G dongle 1a2c:8fff
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1a2c", ATTRS{idProduct}=="a036|8fff", DEVPATH=="*:1.0/*", TAG+="uaccess"
 """
-UDEV_PATH = "/etc/udev/rules.d/70-ajazz-ak820.rules"
+UDEV_PATH = "/etc/udev/rules.d/70-openajazz.rules"
 
 
 def cmd_udev(args):
     import subprocess
     if not args.install:
         console.print(Panel(UDEV_RULE.strip(), title=UDEV_PATH, expand=False))
-        console.print("install it with [bold]ak820ctl udev --install[/] (asks for sudo), "
+        console.print("install it with [bold]openajazz udev --install[/] (asks for sudo), "
                       "then replug the keyboard or dongle")
         return
     subprocess.run(["sudo", "tee", UDEV_PATH], input=UDEV_RULE.encode(),
@@ -402,8 +457,8 @@ def cmd_tui(args):
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="ak820ctl",
-        description="Unofficial AJAZZ AK820 Max Plus control. Run with no command for the TUI.")
+        prog="openajazz",
+        description="Unofficial control for AJAZZ keyboards (AK820 Max Plus). Run with no command for the TUI.")
     p.add_argument("--device", help="hidraw node (default: auto-detect)")
     p.add_argument("-n", "--dry-run", action="store_true",
                    help="simulate: print packets, send nothing, don't touch saved state")
@@ -442,7 +497,17 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--fresh", action="store_true",
                    help="start from black instead of your last custom colours")
 
-    s = add("music", cmd_music, "audio-reactive lighting (needs ak820ctl[music])")
+    s = add("music", cmd_music, "audio-reactive lighting (needs openajazz[music])")
+    s.add_argument("--style", choices=["spectrum", "pulse", "wave"], default="spectrum")
+    s.add_argument("--color", help="single colour instead of rainbow")
+    s.add_argument("--sensitivity", type=float, default=1.0)
+    s.add_argument("--fps", type=int, default=30)
+    s.add_argument("--background", action="store_true", help="keep running after the terminal closes")
+    s.add_argument("--stop", action="store_true", help="stop a background run")
+    s.add_argument("--quiet", action="store_true", help="no live display (for services)")
+
+    s = add("autostart", cmd_autostart, "start music sync at login (systemd user service)")
+    s.add_argument("what", choices=["music", "off", "status"])
     s.add_argument("--style", choices=["spectrum", "pulse", "wave"], default="spectrum")
     s.add_argument("--color", help="single colour instead of rainbow")
     s.add_argument("--sensitivity", type=float, default=1.0)

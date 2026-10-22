@@ -1,6 +1,6 @@
 import pytest
 
-from ak820 import keys, patterns, state
+from openajazz import keys, patterns, state
 
 
 @pytest.mark.parametrize("name", list(patterns.PATTERNS))

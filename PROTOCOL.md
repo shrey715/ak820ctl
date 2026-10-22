@@ -1,4 +1,4 @@
-# AK820 Max Plus HID protocol
+# AJAZZ AK820 Max Plus HID protocol
 
 Recovered from the vendor package
 `AJAZZ_AK820_MAX_PLUS_Tripe_Mode_RGB_Keyboard_Drive_XY_version__V1.0.4.6.rar`
@@ -102,7 +102,7 @@ events are dropped.
 ### Restoring one key
 
 The vendor app never sends a "default" target for a single key. It sends `0F`
-and then re-uploads every remaining remap and macro (`sub_4101a0`). ak820ctl
+and then re-uploads every remaining remap and macro (`sub_4101a0`). openajazz
 does the same, so restoring a key doesn't depend on guessing what target `0`
 means.
 

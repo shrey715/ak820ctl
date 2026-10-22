@@ -1,7 +1,7 @@
 {
-  "name": "ak820ctl web",
-  "short_name": "AK820",
-  "description": "Unofficial control panel for the AJAZZ AK820 Max Plus keyboard",
+  "name": "openajazz",
+  "short_name": "openajazz",
+  "description": "Unofficial control panel for AJAZZ keyboards",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

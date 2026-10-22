@@ -1,6 +1,6 @@
 """High-level operations that keep the local state file in sync.
 
-The CLI and the TUI both go through these, so `ak820ctl lights on` restores
+The CLI and the TUI both go through these, so `openajazz lights on` restores
 whatever either of them last sent.  Callers decide when to `state.save()`.
 """
 

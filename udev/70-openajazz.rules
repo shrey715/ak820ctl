@@ -1,0 +1,5 @@
+# openajazz: let the logged-in user open the config interface (USB interface 0)
+# of supported AJAZZ keyboards. The typing interfaces stay root-only, so nothing
+# can read keystrokes through this rule.
+#   AK820 Max Plus: wired 1a2c:a036, 2.4G dongle 1a2c:8fff
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1a2c", ATTRS{idProduct}=="a036|8fff", DEVPATH=="*:1.0/*", TAG+="uaccess"

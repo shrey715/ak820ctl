@@ -1,4 +1,4 @@
-// WebHID port of ak820/protocol.py + ak820/control.py.  See PROTOCOL.md.
+// WebHID port of openajazz/protocol.py + openajazz/control.py.  See PROTOCOL.md.
 import { DATA } from "./data.js";
 
 export const VENDOR_ID = 0x1a2c;
@@ -241,8 +241,9 @@ export class Keyboard {
   async factoryReset() { await this.send(CMD.FACTORY_RESET); await sleep(100); }
 }
 
-// -- state (localStorage), same shape as ~/.config/ak820ctl/state.json -------
-const STATE_KEY = "ak820ctl-state";
+// -- state (localStorage), same shape as ~/.config/openajazz/state.json -------
+const STATE_KEY = "openajazz-state";
+const OLD_STATE_KEY = "ak820ctl-state";  // name before 0.4
 
 export function defaultState() {
   return {
@@ -255,7 +256,7 @@ export function defaultState() {
 export function loadState() {
   const st = defaultState();
   try {
-    const saved = JSON.parse(localStorage.getItem(STATE_KEY) || "{}");
+    const saved = JSON.parse(localStorage.getItem(STATE_KEY) || localStorage.getItem(OLD_STATE_KEY) || "{}");
     for (const [k, v] of Object.entries(saved)) {
       if (st[k] && typeof st[k] === "object" && typeof v === "object") Object.assign(st[k], v);
       else if (k in st) st[k] = v;

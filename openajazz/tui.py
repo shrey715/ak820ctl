@@ -33,10 +33,10 @@ TABS = ["tab-light", "tab-rgb", "tab-remap", "tab-macro", "tab-music", "tab-sett
 UNDO_LIMIT = 50
 
 HELP = f"""\
-# ak820ctl {__version__}
+# openajazz {__version__}
 
 Unofficial. The keyboard can't report its settings back, so this app shows
-what it last sent (saved in `~/.config/ak820ctl`, shared with the CLI).
+what it last sent (saved in `~/.config/openajazz`, shared with the CLI).
 
 | key | action |
 |---|---|
@@ -61,7 +61,7 @@ the real keyboard right away; upload to store it.
 key resets the keymap and re-sends your other remaps and macros, like the
 vendor app does.
 
-**Music.** Needs `numpy` (`pip install 'ak820ctl[music]'`) and PipeWire/Pulse.
+**Music.** Needs `numpy` (`pip install 'openajazz[music]'`) and PipeWire/Pulse.
 """
 
 
@@ -281,8 +281,8 @@ class HelpScreen(ModalScreen):
 # -- app --------------------------------------------------------------------
 
 class AK820App(App):
-    TITLE = "AK820 Max Plus"
-    SUB_TITLE = "unofficial linux driver"
+    TITLE = "openajazz"
+    SUB_TITLE = "AK820 Max Plus · unofficial"
     CSS = """
     Screen { background: $background; }
     #statusbar { height: 3; padding: 0 1; border: round $primary; }

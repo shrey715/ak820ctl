@@ -3,16 +3,16 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "ak820ctl"
+name = "openajazz"
 dynamic = ["version"]
-description = "Unofficial control for the AJAZZ AK820 Max Plus keyboard: lighting, per-key RGB, remaps, macros, music sync. CLI + TUI."
+description = "Unofficial control for AJAZZ keyboards (AK820 Max Plus so far): lighting, per-key RGB, remaps, macros, music sync. CLI, TUI and web."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Shreyas Deb", email = "shreyasdeb@gmail.com" }]
 requires-python = ">=3.10"
 dependencies = ["rich>=12", "textual>=3.0"]
-keywords = ["ajazz", "ak820", "ak820 max", "keyboard", "rgb", "hid", "hidraw", "linux", "tui", "macro"]
+keywords = ["ajazz", "ak820", "ak820 max plus", "keyboard", "mechanical keyboard", "rgb", "hid", "hidraw", "linux", "tui", "macro"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
@@ -26,24 +26,24 @@ classifiers = [
 ]
 
 [project.urls]
-"Web app" = "https://ak820ctl.vercel.app"
-Homepage = "https://github.com/shrey715/ak820ctl"
-Releases = "https://github.com/shrey715/ak820ctl/releases"
-Issues = "https://github.com/shrey715/ak820ctl/issues"
-Protocol = "https://github.com/shrey715/ak820ctl/blob/main/PROTOCOL.md"
+"Web app" = "https://openajazz.vercel.app"
+Homepage = "https://github.com/shrey715/openajazz"
+Releases = "https://github.com/shrey715/openajazz/releases"
+Issues = "https://github.com/shrey715/openajazz/issues"
+Protocol = "https://github.com/shrey715/openajazz/blob/main/PROTOCOL.md"
 
 [project.scripts]
-ak820ctl = "ak820.cli:main"
+openajazz = "openajazz.cli:main"
 
 [project.optional-dependencies]
 music = ["numpy>=1.21"]
 dev = ["pytest"]
 
 [tool.setuptools]
-packages = ["ak820"]
+packages = ["openajazz"]
 
 [tool.setuptools.dynamic]
-version = { attr = "ak820.__version__" }
+version = { attr = "openajazz.__version__" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

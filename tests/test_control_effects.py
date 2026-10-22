@@ -1,7 +1,7 @@
 import pytest
 
-from ak820 import control, effects, keys, state
-from ak820.protocol import Keyboard
+from openajazz import control, effects, keys, state
+from openajazz.protocol import Keyboard
 
 
 def session():
