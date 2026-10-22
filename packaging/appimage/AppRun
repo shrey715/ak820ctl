@@ -1,0 +1,23 @@
+#!/bin/bash
+# AppImage entry point: run ak820ctl with the bundled Python.
+if [ -z "${APPDIR}" ]; then
+    self=$(readlink -f -- "$0")
+    export APPDIR="${self%/*}"
+fi
+export SSL_CERT_FILE="${APPDIR}/opt/_internal/certs.pem"
+export PYTHONNOUSERSITE=1
+
+# Started from a desktop launcher without a terminal: open one for the TUI.
+if [ ! -t 0 ] && [ $# -eq 0 ] && [ -z "${AK820_IN_TERMINAL}" ]; then
+    for term in x-terminal-emulator kgx gnome-terminal konsole xfce4-terminal alacritty kitty foot xterm; do
+        if command -v "$term" >/dev/null 2>&1; then
+            export AK820_IN_TERMINAL=1
+            case "$term" in
+                gnome-terminal|kgx) exec "$term" -- "${APPIMAGE:-$0}" ;;
+                *) exec "$term" -e "${APPIMAGE:-$0}" ;;
+            esac
+        fi
+    done
+fi
+
+exec "${APPDIR}/opt/python3.12/bin/python3.12" -s -m ak820 "$@"

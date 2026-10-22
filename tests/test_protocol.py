@@ -39,9 +39,9 @@ def test_custom_colors_sequence():
     esc = keys.LED_BY_CODE[keys.key_code("esc")]
     kb.set_custom_colors({esc: (255, 0, 0)})
     cmds = [p[4] for p in sent]
-    assert cmds == [0x07, 0x0B, 0x09, 0xF6, 0xF7, 0xF8, 0xF9, 0xFA, 0xFB]
+    assert cmds == [0x07, 0x0B, 0xF6, 0xF7, 0xF8, 0xF9, 0xFA, 0xFB]
     assert sent[0][5] == keys.CUSTOM_MODE - 1
-    first_chunk = sent[3][5:5 + 54]
+    first_chunk = sent[2][5:5 + 54]
     assert first_chunk[esc * 3:esc * 3 + 3] == b"\xff\x00\x00"
 
 
@@ -73,3 +73,48 @@ def test_every_physical_key_has_unique_led():
     leds = [led for _, _, led, _, _ in keys.PHYSICAL_KEYS]
     assert len(leds) == len(set(leds)) == 82
     assert max(leds) < 108
+
+
+def test_live_mode_and_frame():
+    kb, sent = capture()
+    kb.enter_live_mode()
+    kb.send_frame({15: (1, 2, 3)})
+    assert sent[0][4:6] == bytes([0x07, keys.MUSIC_MODE - 1])
+    assert sent[1][4] == 0x09
+    assert [p[4] for p in sent[2:]] == [0xF0, 0xF1, 0xF2, 0xF3, 0xF4, 0xF5]
+    assert sent[2][5 + 45:5 + 48] == bytes([1, 2, 3])
+
+
+def test_lights_off_is_black_custom_map():
+    kb, sent = capture()
+    kb.lights_off()
+    assert sent[0][4:7] == bytes([0x07, 0x17, 0x00])
+    assert all(not any(p[5:]) for p in sent[2:])
+
+
+def test_status_parsing_simulated():
+    kb, _ = capture()
+    st = kb.status()
+    assert st.battery == 87 and st.power == 2 and st.power_name == "on battery"
+    assert st.online and not st.on_charger
+
+
+def test_light_validation():
+    kb, _ = capture()
+    with pytest.raises(ValueError):
+        kb.set_light(7, direction=2)
+    with pytest.raises(ValueError):
+        kb.set_light(7, color=8)
+
+
+def test_effect_and_palette_lookup():
+    assert keys.effect_mode("breathing") == 8
+    assert keys.effect_mode("8") == 8
+    assert keys.effect_mode("galloping") == 19
+    assert keys.effect_mode("sine") == 18
+    assert keys.palette_index("cyan") == 5
+    assert keys.palette_index("rainbow") == 7
+    assert keys.direction_value("right-to-left") == 1
+    with pytest.raises(KeyError):
+        keys.effect_mode("nope")
+    assert keys.key_code("f13") == 0x68

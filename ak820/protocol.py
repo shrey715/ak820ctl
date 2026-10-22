@@ -51,9 +51,12 @@ class HidInterface:
     product_id: int
     interface: str
     is_control: bool
+    bus: int = 0x03
 
     @property
     def connection(self) -> str:
+        if self.bus == 0x05:
+            return "Bluetooth"
         return PRODUCTS.get(self.product_id, f"PID {self.product_id:04x}")
 
 
@@ -69,16 +72,17 @@ def find_interfaces() -> list[HidInterface]:
         try:
             uevent = open(os.path.join(node, "device/uevent")).read()
             hid_id = next(l for l in uevent.splitlines() if l.startswith("HID_ID="))
-            _, vid, pid = hid_id.split("=")[1].split(":")
-            vid, pid = int(vid, 16), int(pid, 16)
-            if vid != VENDOR_ID or pid not in PRODUCTS:
-                continue
+            bus, vid, pid = (int(x, 16) for x in hid_id.split("=")[1].split(":"))
             desc = open(os.path.join(node, "device/report_descriptor"), "rb").read()
+            # Known USB ids, or any other link (e.g. Bluetooth) from the same
+            # vendor that exposes the config collection.
+            if vid != VENDOR_ID or (pid not in PRODUCTS and not _is_control_descriptor(desc)):
+                continue
             iface = os.path.basename(os.path.realpath(os.path.join(node, "device/..")))
         except (OSError, StopIteration, ValueError):
             continue
         found.append(HidInterface("/dev/" + os.path.basename(node), pid, iface,
-                                  _is_control_descriptor(desc)))
+                                  _is_control_descriptor(desc), bus))
     return found
 
 
@@ -115,11 +119,22 @@ def encode_delay(release: bool, delay_ms: int) -> int:
 @dataclass
 class Status:
     battery: int | None
-    link: int
+    power: int  # keys.POWER_STATES
+
+    @property
+    def power_name(self) -> str:
+        return keys.POWER_STATES.get(self.power, f"unknown ({self.power})")
 
     @property
     def online(self) -> bool:
-        return self.link in (1, 3)
+        return self.power != 0
+
+    @property
+    def on_charger(self) -> bool:
+        return self.power in (1, 3)
+
+
+SIMULATED_STATUS = (MAGIC + bytes([CMD_STATUS, 87, 2])).ljust(REPORT_LEN, b"\x00")
 
 
 class Keyboard:
@@ -168,7 +183,9 @@ class Keyboard:
         os.write(self.fd, b"\x00" + report)
 
     def _read(self, timeout: float) -> bytes | None:
-        if self.dry_run or not select.select([self.fd], [], [], timeout)[0]:
+        if self.dry_run:
+            return SIMULATED_STATUS
+        if not select.select([self.fd], [], [], timeout)[0]:
             return None
         return os.read(self.fd, REPORT_LEN)
 
@@ -202,15 +219,20 @@ class Keyboard:
         if resp is None:
             return None
         battery = resp[5] if resp[5] <= 100 else None
-        return Status(battery=battery, link=resp[6])
+        return Status(battery=battery, power=resp[6])
 
     def set_light(self, mode: int, brightness: int = keys.DEFAULT_BRIGHTNESS,
-                  speed: int = keys.DEFAULT_SPEED, direction: int = 0, color: int = 0):
+                  speed: int = keys.DEFAULT_SPEED, direction: int = 0,
+                  color: int = keys.RAINBOW):
         for name, v in (("brightness", brightness), ("speed", speed)):
             if not 1 <= v <= keys.MAX_LEVEL:
                 raise ValueError(f"{name} must be 1..{keys.MAX_LEVEL}")
-        self.send(CMD_LIGHT, bytes([mode - 1, brightness - 1, speed - 1,
-                                    direction & 0xFF, color & 0xFF]))
+        if direction not in (0, 1):
+            raise ValueError("direction must be 0 (left to right) or 1 (right to left)")
+        if not 0 <= color < len(keys.PALETTE):
+            raise ValueError(f"colour index must be 0..{len(keys.PALETTE) - 1}")
+        self.send(CMD_LIGHT, bytes([mode - 1, brightness - 1, speed - 1, direction, color]))
+        time.sleep(0.01)
 
     @staticmethod
     def _led_buffer(colors: dict[int, tuple[int, int, int]]) -> bytes:
@@ -222,18 +244,35 @@ class Keyboard:
 
     def set_custom_colors(self, colors: dict[int, tuple[int, int, int]],
                           brightness: int = keys.DEFAULT_BRIGHTNESS):
-        """Switch to custom mode and store per-LED colours (sub_411130/sub_429ed0)."""
+        """Switch to custom mode and store per-LED colours (sub_411130/sub_429ed0).
+
+        07 17 .. -> 0B -> F6..FB is the sequence confirmed on hardware.
+        """
         self.set_light(keys.CUSTOM_MODE, brightness)
         self.send(CMD_CUSTOM_BEGIN)
         time.sleep(0.01)
-        self.send(CMD_STREAM_BEGIN, reply=True)
         self._send_chunks(CMD_CUSTOM_BASE, self._led_buffer(colors), 6, 0.003)
 
-    def send_frame(self, colors: dict[int, tuple[int, int, int]], begin: bool = True):
-        """Live LED frame, not persisted (sub_427980).  Experimental."""
-        if begin:
-            self.send(CMD_STREAM_BEGIN, reply=True)
-        self._send_chunks(CMD_FRAME_BASE, self._led_buffer(colors), 6, 0.003)
+    def lights_off(self):
+        """No off command exists; an all-black custom map does the job."""
+        self.set_custom_colors({}, brightness=1)
+
+    def enter_live_mode(self, mode: int = keys.MUSIC_MODE):
+        """Select a host-driven mode (22 music / 23 screen) and open the frame stream.
+
+        Frames are not stored.  When they stop, the keyboard goes back to its
+        stored effect on its own (hardware-verified at 20 fps).
+        """
+        self.set_light(mode, 5, 3)
+        self.send(CMD_STREAM_BEGIN)  # the vendor app waits for a reply that never comes
+        time.sleep(0.05)
+
+    def send_frame(self, colors: dict[int, tuple[int, int, int]]):
+        """One live LED frame (sub_427980).  Call enter_live_mode() first."""
+        buf = self._led_buffer(colors)
+        for i in range(6):
+            self._write((MAGIC + bytes([CMD_FRAME_BASE + i]) +
+                         buf[i * CHUNK:(i + 1) * CHUNK]).ljust(REPORT_LEN, b"\x00"))
 
     def set_sleep(self, option: int):
         """1 = 5 min, 2 = 15 min, 3 = 30 min, 4 = never."""

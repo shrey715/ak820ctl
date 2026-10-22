@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import threading
+import time
 
 from rich.text import Text
 from textual import events, on, work
@@ -18,8 +19,8 @@ from textual.widgets import (Button, DataTable, Footer, Header, Input, Label, Ma
                              Switch, TabbedContent, TabPane)
 from textual.widgets.option_list import Option
 
-from . import __version__, keys, patterns, state
-from .cli import LINK_STATES, NAMED_COLORS, parse_color, parse_macro_events
+from . import __version__, control, effects, keys, patterns, state
+from .cli import NAMED_COLORS, parse_color
 from .protocol import DeviceError, Keyboard, find_interfaces
 
 TARGET_OPTIONS = ([(f"key · {n}", c) for n, c in keys.HID_USAGES.items()] +
@@ -28,29 +29,39 @@ LEGEND_BY_CODE = {code: legend for code, legend, _, _, _ in keys.PHYSICAL_KEYS}
 SWATCHES = ["red", "orange", "yellow", "green", "cyan", "blue", "purple", "pink",
             "white", "off"]
 SLEEP_LABELS = ["5 min", "15 min", "30 min", "never"]
-TABS = ["tab-light", "tab-rgb", "tab-remap", "tab-macro", "tab-settings"]
+TABS = ["tab-light", "tab-rgb", "tab-remap", "tab-macro", "tab-music", "tab-settings"]
+UNDO_LIMIT = 50
 
 HELP = f"""\
 # ak820ctl {__version__}
 
 Unofficial. The keyboard can't report its settings back, so this app shows
-what it last sent (saved in `~/.config/ak820ctl`).
+what it last sent (saved in `~/.config/ak820ctl`, shared with the CLI).
 
 | key | action |
 |---|---|
-| `1`–`5` | switch tabs |
+| `1`–`6` | switch tabs |
 | `ctrl+s` | apply the current tab |
+| `o` | lights off / on |
+| `ctrl+z` / `ctrl+y` | undo / redo in the per-key painter |
 | `r` | refresh battery |
 | `l` | show / hide the packet log |
 | `ctrl+p` | command palette, themes |
 | `q` | quit |
 
-**Per-key RGB.** Pick a brush colour, then click or drag across keys to paint.
-The *pick* tool copies a key's colour into the brush. *Select* marks keys so a
-pattern only fills those. Nothing reaches the keyboard until you upload.
+**Lighting.** Browse effects on the left; the preview below is an
+approximation of what the keyboard draws. Enter or `ctrl+s` applies.
 
-**Remap / macro.** Click the key you want to change on the map. Remapped keys
-are tinted. Restoring a remap sends the key back to itself.
+**Per-key RGB.** Pick a brush colour, then click or drag across keys to paint.
+*Pick colour* copies a key's colour into the brush; *select* marks keys so a
+pattern only fills those. With *live on keyboard* on, every stroke shows up on
+the real keyboard right away; upload to store it.
+
+**Remap / macro.** Click the key you want to change on the map. Restoring a
+key resets the keymap and re-sends your other remaps and macros, like the
+vendor app does.
+
+**Music.** Needs `numpy` (`pip install 'ak820ctl[music]'`) and PipeWire/Pulse.
 """
 
 
@@ -107,6 +118,15 @@ class KeyboardMap(Vertical):
         def control(self):
             return self.keymap
 
+    class StrokeEnded(Message):
+        def __init__(self, keymap: "KeyboardMap"):
+            super().__init__()
+            self.keymap = keymap
+
+        @property
+        def control(self):
+            return self.keymap
+
     def __init__(self, **kwargs):
         super().__init__(classes="keymap", **kwargs)
         self.dragging = False
@@ -126,8 +146,49 @@ class KeyboardMap(Vertical):
     def cap(self, code: int) -> KeyCap:
         return next(c for c in self.caps() if c.code == code)
 
+    def end_stroke(self):
+        if self.dragging:
+            self.dragging = False
+            self.post_message(self.StrokeEnded(self))
+
     def on_mouse_up(self):
-        self.dragging = False
+        self.end_stroke()
+
+
+class KeyboardPreview(Static):
+    """Compact colour-only keyboard drawn from the vendor key rectangles."""
+
+    SCALE = 0.125  # terminal columns per vendor pixel
+
+    def __init__(self, **kwargs):
+        super().__init__(classes="preview", **kwargs)
+        self.frame: dict[int, tuple[int, int, int]] = {}
+        rows: dict[int, list] = {}
+        x0 = min(x for x, _, _, _ in keys.KEY_RECTS.values())
+        for _, _, led, row, _ in keys.PHYSICAL_KEYS:
+            x, _, w, _ = keys.KEY_RECTS[led]
+            start = round((x - x0) * self.SCALE)
+            rows.setdefault(row, []).append((start, max(2, round(w * self.SCALE) - 1), led))
+        self.rows = [sorted(rows[r]) for r in sorted(rows)]
+
+    def show(self, frame: dict[int, tuple[int, int, int]]):
+        self.frame = frame
+        self.refresh()
+
+    def render(self) -> Text:
+        text = Text()
+        for i, row in enumerate(self.rows):
+            col = 0
+            for start, width, led in row:
+                if start > col:
+                    text.append(" " * (start - col))
+                    col = start
+                r, g, b = self.frame.get(led, (24, 24, 24))
+                text.append(" " * width, style=f"on rgb({r},{g},{b})")
+                col += width
+            if i < len(self.rows) - 1:
+                text.append("\n\n")
+        return text
 
 
 class LevelPicker(Widget, can_focus=True):
@@ -145,18 +206,19 @@ class LevelPicker(Widget, can_focus=True):
         def control(self):
             return self.picker
 
-    def __init__(self, value: int, **kwargs):
+    def __init__(self, value: int, maximum: int = keys.MAX_LEVEL, **kwargs):
         super().__init__(**kwargs)
+        self.maximum = maximum
         self.set_reactive(LevelPicker.value, value)
 
     def render(self) -> Text:
         text = Text()
-        for i in range(1, keys.MAX_LEVEL + 1):
+        for i in range(1, self.maximum + 1):
             filled = i <= self.value
             text.append("███ " if filled else "░░░ ",
                         style="grey42" if self.disabled else
                         ("bold #f0a030" if filled else "grey35"))
-        text.append(f" {self.value}/{keys.MAX_LEVEL}",
+        text.append(f" {self.value}/{self.maximum}",
                     style="grey42" if self.disabled else "bold")
         return text
 
@@ -164,11 +226,11 @@ class LevelPicker(Widget, can_focus=True):
         self.post_message(self.Changed(self, value))
 
     def on_click(self, event: events.Click):
-        if not self.disabled and event.x < keys.MAX_LEVEL * 4:
+        if not self.disabled and event.x < self.maximum * 4:
             self.value = event.x // 4 + 1
 
     def action_step(self, delta: int):
-        self.value = min(max(self.value + delta, 1), keys.MAX_LEVEL)
+        self.value = min(max(self.value + delta, 1), self.maximum)
 
 
 class Swatch(Static):
@@ -241,23 +303,24 @@ class AK820App(App):
     .keycap.picked { outline: heavy $success; text-style: bold; }
     .keycap.remapped { background: $secondary 60%; color: $text; }
     .keycap.has-macro { background: $accent 50%; color: $text; }
+    .preview { width: auto; height: auto; padding: 1 2; border: round $panel-lighten-1;
+               margin: 1 0; }
 
-    .panel { border: round $panel-lighten-1; padding: 0 1; height: auto; }
     .row { height: auto; margin: 0 0 1 0; }
     .caption { color: $text-muted; }
     .field { width: 14; padding: 1 0 0 0; }
     LevelPicker { width: 30; height: 1; margin: 1 0 0 0; }
     LevelPicker:focus { background: $boost; }
+    Select { width: 34; }
 
     #light-body { height: 1fr; }
-    #mode-list { width: 40; height: 1fr; border: round $panel-lighten-1; }
+    #mode-list { width: 38; height: 1fr; border: round $panel-lighten-1; }
     #light-params { width: 1fr; padding: 0 2; }
     #mode-title { text-style: bold; color: $accent; margin: 1 0 0 0; }
 
     #rgb-tools { height: auto; }
     .swatch { width: 8; height: 1; content-align: center middle; margin: 0 1 0 0; }
-    #brush { width: 18; height: 3; content-align: center middle; border: tall $panel; }
-    #brush2 { width: 18; height: 3; content-align: center middle; border: tall $panel; }
+    #brush, #brush2 { width: 18; height: 3; content-align: center middle; border: tall $panel; }
     #hexcolor, #hexcolor2 { width: 18; margin: 0 2 0 0; }
     #tool { layout: horizontal; width: auto; height: auto; border: none; padding: 0;
             background: transparent; margin: 1 0 0 0; }
@@ -265,12 +328,18 @@ class AK820App(App):
     #pattern, #preset-load { width: 44; }
     #preset-name { width: 22; }
     #dirty { color: $warning; padding: 1 0 0 1; }
+    #live-rgb-row Label { padding: 1 1 0 0; }
 
     #remap-side, #macro-side { width: 1fr; min-width: 34; padding: 0 1; }
     #remap-side Button, #macro-side Button { min-width: 12; }
     #remap-target { width: 40; }
     #remap-table, #macro-table { height: 10; }
     #macro-preview { height: auto; min-height: 1; margin: 1 0; }
+
+    #music-controls { width: 44; padding: 0 1; }
+    #music-side { width: 1fr; }
+    #music-bars { height: 3; padding: 0 2; }
+    #music-sens { width: 12; }
 
     #settings-row { height: auto; }
     #settings-row RadioSet { width: 24; margin: 1 2 1 0; }
@@ -279,16 +348,19 @@ class AK820App(App):
     #dialog { width: 62; height: auto; border: thick $error; padding: 1 2;
               background: $surface; }
     #dialog-buttons { height: auto; margin: 1 0 0 0; align-horizontal: right; }
-    #help { width: 76; height: 80%; border: thick $primary; padding: 1 2;
+    #help { width: 78; height: 85%; border: thick $primary; padding: 1 2;
             background: $surface; }
     Button { margin: 0 1 0 0; }
     """
     BINDINGS = [
         Binding("ctrl+s", "apply", "Apply"),
+        Binding("o", "toggle_lights", "Lights"),
         Binding("r", "refresh_status", "Battery"),
         Binding("l", "toggle_log", "Log"),
         Binding("question_mark,f1", "help", "Help"),
         Binding("q", "quit", "Quit"),
+        Binding("ctrl+z", "undo", "Undo", show=False),
+        Binding("ctrl+y,ctrl+shift+z", "redo", "Redo", show=False),
         *[Binding(str(i + 1), f"tab({i})", show=False) for i in range(len(TABS))],
     ]
 
@@ -302,6 +374,11 @@ class AK820App(App):
         self.brush2 = (0, 0, 40)
         self.remap_src: int | None = None
         self.macro_src: int | None = None
+        self.undo_stack: list[dict] = []
+        self.redo_stack: list[dict] = []
+        self.live_rgb = False
+        self.visualizer = None
+        self.t0 = time.monotonic()
 
     # -- layout ------------------------------------------------------------
 
@@ -310,7 +387,8 @@ class AK820App(App):
         with Horizontal(id="statusbar"):
             yield Static("[yellow]●[/] connecting…", id="conn")
             yield Static("", id="battery")
-            yield Static("", id="link")
+            yield Static("", id="power")
+            yield Static("", id="lights")
         with TabbedContent():
             with TabPane("1 Lighting", id="tab-light"):
                 yield from self.compose_lighting()
@@ -320,7 +398,9 @@ class AK820App(App):
                 yield from self.compose_remap()
             with TabPane("4 Macro", id="tab-macro"):
                 yield from self.compose_macro()
-            with TabPane("5 Settings", id="tab-settings"):
+            with TabPane("5 Music", id="tab-music"):
+                yield from self.compose_music()
+            with TabPane("6 Settings", id="tab-settings"):
                 yield from self.compose_settings()
         yield RichLog(id="log", markup=True, wrap=True, classes="hidden")
         yield Footer()
@@ -329,7 +409,9 @@ class AK820App(App):
         light = self.state["light"]
         with Horizontal(id="light-body"):
             yield OptionList(*[Option(f"{n:>2}  {name}", id=str(n))
-                               for n, (name, _) in keys.LIGHT_MODES.items()], id="mode-list")
+                               for n, (name, _) in keys.LIGHT_MODES.items()
+                               if n not in (keys.MUSIC_MODE, keys.SCREEN_MODE)],
+                             id="mode-list")
             with VerticalScroll(id="light-params"):
                 yield Label("", id="mode-title")
                 yield Label("", id="mode-hint", classes="caption")
@@ -341,13 +423,15 @@ class AK820App(App):
                     yield LevelPicker(light["speed"], id="speed")
                 with Horizontal(classes="row"):
                     yield Label("Direction", classes="field")
-                    yield Select([(f"direction {i}", i) for i in range(4)],
-                                 value=light["direction"], allow_blank=False, id="direction")
+                    yield Select([("left to right", 0), ("right to left", 1)],
+                                 value=light["direction"] if light["direction"] in (0, 1) else 0,
+                                 allow_blank=False, id="direction")
                 with Horizontal(classes="row"):
                     yield Label("Colour", classes="field")
-                    yield Select([(f"palette index {i}", i) for i in range(9)],
-                                 value=light["color"], allow_blank=False, id="colorindex")
-                yield Label("[dim]palette index → colour isn't mapped yet (issue #1)[/]")
+                    yield Select([(name, i) for i, (name, _) in enumerate(keys.PALETTE)],
+                                 value=light["color"] if light["color"] < len(keys.PALETTE)
+                                 else keys.RAINBOW, allow_blank=False, id="colorindex")
+                yield KeyboardPreview(id="light-preview")
                 yield Button("Apply effect", id="apply-light", variant="primary")
 
     def compose_rgb(self) -> ComposeResult:
@@ -373,12 +457,16 @@ class AK820App(App):
                                  value="rainbow-horizontal", allow_blank=False, id="pattern")
                     yield Button("Fill pattern", id="fill-pattern")
                     yield Button("Clear selection", id="sel-none")
+                    yield Button("Undo", id="undo")
+                    yield Button("Redo", id="redo")
                 with Horizontal(classes="row"):
                     yield Input(placeholder="preset name", id="preset-name")
                     yield Button("Save preset", id="save-preset")
                     yield Select([], prompt="load preset…", id="preset-load")
-                with Horizontal(classes="row"):
+                with Horizontal(classes="row", id="live-rgb-row"):
                     yield Button("Upload to keyboard", id="upload-rgb", variant="primary")
+                    yield Label("live on keyboard")
+                    yield Switch(id="live-rgb")
                     yield Label("", id="dirty")
 
     def compose_remap(self) -> ComposeResult:
@@ -418,6 +506,30 @@ class AK820App(App):
                 yield Label("[b]Your macros[/b]")
                 yield DataTable(id="macro-table", cursor_type="row")
 
+    def compose_music(self) -> ComposeResult:
+        with Horizontal():
+            with VerticalScroll(id="music-controls"):
+                yield Label("[b]Music sync[/b]")
+                yield Label("reacts to what your speakers play", classes="caption")
+                with Horizontal(classes="row"):
+                    yield Label("Style", classes="field")
+                    yield Select([("spectrum", "spectrum"), ("pulse", "pulse"),
+                                  ("wave", "wave")], value="spectrum", allow_blank=False,
+                                 id="music-style")
+                with Horizontal(classes="row"):
+                    yield Label("Colour", classes="field")
+                    yield Select([("rainbow", "rainbow"), ("brush colour", "brush")],
+                                 value="rainbow", allow_blank=False, id="music-color")
+                with Horizontal(classes="row"):
+                    yield Label("Sensitivity", classes="field")
+                    yield LevelPicker(3, id="music-sens-level")
+                with Horizontal(classes="row"):
+                    yield Button("Start", id="music-start", variant="success")
+                    yield Button("Stop", id="music-stop", variant="error", disabled=True)
+            with Vertical(id="music-side"):
+                yield KeyboardPreview(id="music-preview")
+                yield Static("", id="music-bars")
+
     def compose_settings(self) -> ComposeResult:
         s = self.state["settings"]
         with Horizontal(id="settings-row"):
@@ -430,8 +542,8 @@ class AK820App(App):
             with RadioSet(id="fnswitch"):
                 yield RadioButton("normal", value=not s["fn"], name="0")
                 yield RadioButton("fn", value=s["fn"], name="1")
-        yield Label("[dim]gear 1 is the fastest response. "
-                    "fn switch swaps the F-row default layer.[/]")
+        yield Label("[dim]gear 1 is the fastest response. the fn switch had no visible "
+                    "effect in hardware tests so far.[/]")
         with Horizontal(classes="row"):
             yield Button("Apply settings", id="apply-settings", variant="primary")
             yield Button("Factory reset", id="factory", variant="error")
@@ -445,11 +557,17 @@ class AK820App(App):
         self.query_one("#rgb-map", KeyboardMap).border_title = "click or drag to paint"
         self.query_one("#remap-map", KeyboardMap).border_title = "pick a key"
         self.query_one("#macro-map", KeyboardMap).border_title = "pick a key"
+        self.query_one("#light-preview", KeyboardPreview).border_title = "preview"
+        self.query_one("#music-preview", KeyboardPreview).border_title = "live"
         self.query_one("#remap-table", DataTable).add_columns("key", "→", "function")
         self.query_one("#macro-table", DataTable).add_columns("key", "events", "repeat")
 
+        mode = self.state["light"]["mode"]
         mode_list = self.query_one("#mode-list", OptionList)
-        mode_list.highlighted = mode_list.get_option_index(str(self.state["light"]["mode"]))
+        try:
+            mode_list.highlighted = mode_list.get_option_index(str(mode))
+        except Exception:
+            mode_list.highlighted = 0
         self.set_brush(self.brush)
         self.set_brush2(self.brush2)
         saved = state.colors_from_json(self.state["colors"])
@@ -458,6 +576,8 @@ class AK820App(App):
         self.refresh_presets()
         self.refresh_remaps()
         self.refresh_macros()
+        self.show_lights_state()
+        self.set_interval(1 / 12, self.animate_preview)
         self.connect()
 
     def connect(self):
@@ -470,19 +590,21 @@ class AK820App(App):
             return
         if self.dry_run:
             self.query_one("#conn", Static).update("[blue]●[/] dry run [dim](nothing is sent)[/]")
-            return
-        kind = next((i.connection for i in find_interfaces() if i.path == self.kb.path), "")
-        self.query_one("#conn", Static).update(f"[green]●[/] {kind} [dim]{self.kb.path}[/]")
+        else:
+            kind = next((i.connection for i in find_interfaces() if i.path == self.kb.path), "")
+            self.query_one("#conn", Static).update(f"[green]●[/] {kind} [dim]{self.kb.path}[/]")
         self.action_refresh_status()
         self.set_interval(5, self.action_refresh_status)
 
     def on_unmount(self):
+        if self.visualizer:
+            self.visualizer.stop()
         if self.kb:
             self.kb.close()
 
     def on_mouse_up(self):
         for m in self.query(KeyboardMap):
-            m.dragging = False
+            m.end_stroke()
 
     # -- actions -----------------------------------------------------------
 
@@ -498,8 +620,19 @@ class AK820App(App):
     def action_apply(self):
         handler = {"tab-light": self.apply_light, "tab-rgb": self.upload_rgb,
                    "tab-remap": self.apply_remap, "tab-macro": self.apply_macro,
-                   "tab-settings": self.apply_settings}
+                   "tab-music": self.music_start, "tab-settings": self.apply_settings}
         handler[self.query_one(TabbedContent).active]()
+
+    def action_toggle_lights(self):
+        on = self.state.get("lights_off")
+        self.device_call("lights on" if on else "lights off",
+                         lambda: control.toggle_lights(self.kb, self.state),
+                         self.show_lights_state)
+
+    def show_lights_state(self):
+        off = self.state.get("lights_off")
+        self.query_one("#lights", Static).update(
+            "[dim]○ lights off[/]" if off else "[#f0a030]☀[/] lights on")
 
     # -- device plumbing ---------------------------------------------------
 
@@ -507,8 +640,13 @@ class AK820App(App):
         self.query_one("#log", RichLog).write(msg)
 
     def log_packet(self, report: bytes):
-        self.call_from_thread(self.log_msg,
-                              f"[dim cyan]→ {report.rstrip(bytes(1)).hex(' ')}[/]")
+        if report[4] in range(0xF0, 0xF6):
+            return  # live frames would flood the log
+        try:
+            self.call_from_thread(self.log_msg,
+                                  f"[dim cyan]→ {report.rstrip(bytes(1)).hex(' ')}[/]")
+        except RuntimeError:
+            self.log_msg(f"[dim cyan]→ {report.rstrip(bytes(1)).hex(' ')}[/]")
 
     def device_call(self, label: str, fn, on_success=None):
         if self.kb is None:
@@ -535,17 +673,19 @@ class AK820App(App):
         self.notify(label, title="sent" if not self.dry_run else "dry run", timeout=3)
         if on_success:
             on_success()
-            if not self.dry_run:
-                state.save(self.state)
+        if not self.dry_run:
+            state.save(self.state)
 
     # -- status ------------------------------------------------------------
 
     def action_refresh_status(self):
-        if self.kb and not self.dry_run:
+        if self.kb:
             self.poll_status()
 
     @work(thread=True, exclusive=True, group="status")
     def poll_status(self):
+        if self.visualizer and self.visualizer.running:
+            return  # don't interleave status queries with the frame stream
         with self.lock:
             try:
                 st = self.kb.status()
@@ -554,13 +694,13 @@ class AK820App(App):
         self.call_from_thread(self.show_status, st)
 
     def show_status(self, st):
-        link = self.query_one("#link", Static)
+        power = self.query_one("#power", Static)
         battery = self.query_one("#battery", Static)
         if st is None:
-            link.update("[yellow]no reply[/]")
+            power.update("[yellow]no reply[/]")
             return
-        icon = "⚡" if st.link == 3 else "●" if st.online else "○"
-        link.update(f"{icon} {LINK_STATES.get(st.link, f'link {st.link}')}")
+        icon = "⚡" if st.on_charger else "●" if st.online else "○"
+        power.update(f"{icon} {st.power_name}")
         if st.battery is None or not st.online:
             battery.update("")
             return
@@ -575,6 +715,22 @@ class AK820App(App):
         option = self.query_one("#mode-list", OptionList).highlighted_option
         return int(option.id) if option else self.state["light"]["mode"]
 
+    def light_values(self) -> dict:
+        return {"mode": self.current_mode(),
+                "brightness": self.query_one("#brightness", LevelPicker).value,
+                "speed": self.query_one("#speed", LevelPicker).value,
+                "direction": self.query_one("#direction", Select).value,
+                "color": self.query_one("#colorindex", Select).value}
+
+    def animate_preview(self):
+        t = time.monotonic() - self.t0
+        active = self.query_one(TabbedContent).active
+        if active == "tab-light":
+            light = self.light_values()
+            custom = state.colors_from_json(self.state["colors"])
+            self.query_one("#light-preview", KeyboardPreview).show(
+                effects.frame(**light, t=t, custom=custom))
+
     @on(OptionList.OptionHighlighted, "#mode-list")
     def mode_highlighted(self):
         mode = self.current_mode()
@@ -584,9 +740,10 @@ class AK820App(App):
                 "#direction": keys.ATTR_DIRECTION, "#colorindex": keys.ATTR_COLOR}
         for selector, bit in uses.items():
             self.query_one(selector).disabled = not attr & bit
-        hint = {keys.CUSTOM_MODE: "per-key colours, edit them in the Per-key RGB tab",
-                22: "driven by the PC (music), not implemented yet",
-                23: "driven by the PC (screen), not implemented yet"}.get(mode, "")
+        if mode == keys.CUSTOM_MODE:
+            self.query_one("#brightness").disabled = False
+        hint = ("your per-key colours, edit them in the Per-key RGB tab"
+                if mode == keys.CUSTOM_MODE else "preview is approximate")
         self.query_one("#mode-hint", Label).update(hint)
 
     @on(OptionList.OptionSelected, "#mode-list")
@@ -595,15 +752,14 @@ class AK820App(App):
 
     @on(Button.Pressed, "#apply-light")
     def apply_light(self):
-        light = {"mode": self.current_mode(),
-                 "brightness": self.query_one("#brightness", LevelPicker).value,
-                 "speed": self.query_one("#speed", LevelPicker).value,
-                 "direction": self.query_one("#direction", Select).value,
-                 "color": self.query_one("#colorindex", Select).value}
+        light = self.light_values()
         name = keys.LIGHT_MODES.get(light["mode"], ("?",))[0]
-        self.device_call(f"effect: {name}",
-                         lambda: self.kb.set_light(*light.values()),
-                         lambda: self.state.update(light=light))
+        if light["mode"] == keys.CUSTOM_MODE:
+            colors = state.colors_from_json(self.state["colors"])
+            fn = lambda: control.upload_custom(self.kb, self.state, colors, light["brightness"])
+        else:
+            fn = lambda: control.apply_light(self.kb, self.state, light)
+        self.device_call(f"effect: {name}", fn, self.show_lights_state)
 
     # -- per-key -----------------------------------------------------------
 
@@ -625,11 +781,38 @@ class AK820App(App):
         b2.update(f"second #{rgb_hex(rgb)}")
 
     def mark_dirty(self, dirty: bool = True):
-        self.query_one("#dirty", Label).update("● unsaved changes" if dirty else "")
+        self.query_one("#dirty", Label).update("● not uploaded yet" if dirty else "")
+        if dirty and self.live_rgb:
+            self.push_live_frame()
 
     def tool(self) -> str:
         pressed = self.query_one("#tool", RadioSet).pressed_button
         return pressed.name if pressed else "paint"
+
+    def current_colors(self) -> state.Colors:
+        return {cap.led: cap.rgb or (0, 0, 0) for cap in self.rgb_map().caps()}
+
+    def snapshot(self):
+        self.undo_stack.append(self.current_colors())
+        del self.undo_stack[:-UNDO_LIMIT]
+        self.redo_stack.clear()
+
+    def restore_colors(self, colors: state.Colors):
+        for cap in self.rgb_map().caps():
+            cap.paint(colors.get(cap.led, (0, 0, 0)))
+        self.mark_dirty()
+
+    @on(Button.Pressed, "#undo")
+    def action_undo(self):
+        if self.undo_stack:
+            self.redo_stack.append(self.current_colors())
+            self.restore_colors(self.undo_stack.pop())
+
+    @on(Button.Pressed, "#redo")
+    def action_redo(self):
+        if self.redo_stack:
+            self.undo_stack.append(self.current_colors())
+            self.restore_colors(self.redo_stack.pop())
 
     @on(Swatch.Picked)
     def swatch_picked(self, event: Swatch.Picked):
@@ -649,8 +832,11 @@ class AK820App(App):
     def rgb_key(self, event: KeyboardMap.KeyPressed):
         tool = self.tool()
         if tool == "paint":
-            event.cap.paint(self.brush)
-            self.mark_dirty()
+            if not event.drag:
+                self.snapshot()
+            if event.cap.rgb != self.brush:
+                event.cap.paint(self.brush)
+                self.mark_dirty()
         elif tool == "pick" and not event.drag:
             self.set_brush(event.cap.rgb or (0, 0, 0))
             self.query_one("#tool", RadioSet).query(RadioButton).first().value = True
@@ -664,6 +850,7 @@ class AK820App(App):
 
     @on(Button.Pressed, "#fill-pattern")
     def fill_pattern(self):
+        self.snapshot()
         colours = patterns.generate(self.query_one("#pattern", Select).value,
                                     self.brush, self.brush2)
         caps = self.rgb_map().caps()
@@ -672,20 +859,42 @@ class AK820App(App):
             cap.paint(colours[cap.led])
         self.mark_dirty()
 
-    def current_colors(self) -> state.Colors:
-        return {cap.led: cap.rgb or (0, 0, 0) for cap in self.rgb_map().caps()}
+    @on(Switch.Changed, "#live-rgb")
+    def live_rgb_changed(self, event: Switch.Changed):
+        if self.kb is None:
+            return
+        self.live_rgb = event.value
+        if event.value:
+            colors = self.current_colors()
+            self.device_call("live preview on", lambda: (self.kb.enter_live_mode(),
+                                                         self.kb.send_frame(colors)))
+        else:
+            self.device_call("live preview off, stored lighting back",
+                             lambda: control.lights_on(self.kb, self.state)
+                             if not self.state.get("lights_off") else self.kb.lights_off())
+
+    @work(thread=True, exclusive=True, group="live")
+    def push_live_frame(self):
+        colors = self.call_from_thread(self.current_colors)
+        with self.lock:
+            try:
+                self.kb.send_frame(colors)
+            except (DeviceError, OSError):
+                pass
 
     @on(Button.Pressed, "#upload-rgb")
     def upload_rgb(self):
         colors = self.current_colors()
-        brightness = self.state["light"]["brightness"]
+        brightness = self.query_one("#brightness", LevelPicker).value
 
         def saved():
-            self.state["colors"] = state.colors_to_json(colors)
-            self.state["light"]["mode"] = keys.CUSTOM_MODE
             self.mark_dirty(False)
+            self.show_lights_state()
+            if self.live_rgb:
+                self.query_one("#live-rgb", Switch).value = False
         self.device_call("per-key colours uploaded",
-                         lambda: self.kb.set_custom_colors(colors, brightness), saved)
+                         lambda: control.upload_custom(self.kb, self.state, colors, brightness),
+                         saved)
 
     def refresh_presets(self):
         self.query_one("#preset-load", Select).set_options(
@@ -711,9 +920,8 @@ class AK820App(App):
         except (OSError, ValueError) as e:
             self.notify(str(e), severity="error")
             return
-        for cap in self.rgb_map().caps():
-            cap.paint(colors.get(cap.led, (0, 0, 0)))
-        self.mark_dirty()
+        self.snapshot()
+        self.restore_colors(colors)
         self.notify(f"loaded '{event.value}', upload to send it")
 
     # -- remap -------------------------------------------------------------
@@ -757,6 +965,10 @@ class AK820App(App):
         self.remap_src = src
         self.refresh_remaps()
 
+    def keys_changed(self):
+        self.refresh_remaps()
+        self.refresh_macros()
+
     @on(Button.Pressed, "#apply-remap")
     def apply_remap(self):
         dst = self.query_one("#remap-target", Select).value
@@ -764,12 +976,9 @@ class AK820App(App):
             self.notify("pick a key on the map and a function", severity="warning")
             return
         layer, src = self.remap_layer(), self.remap_src
-
-        def saved():
-            self.state["remaps"][f"{layer}:{src}"] = dst
-            self.refresh_remaps()
         self.device_call(f"{key_label(layer, src)} → {keys.code_name(dst)}",
-                         lambda: self.kb.remap(layer, src, dst), saved)
+                         lambda: control.remap(self.kb, self.state, layer, src, dst),
+                         self.keys_changed)
 
     @on(Button.Pressed, "#restore-key")
     def restore_key(self):
@@ -777,24 +986,17 @@ class AK820App(App):
             self.notify("pick a key first", severity="warning")
             return
         layer, src = self.remap_layer(), self.remap_src
-
-        def saved():
-            self.state["remaps"].pop(f"{layer}:{src}", None)
-            self.refresh_remaps()
         self.device_call(f"{key_label(layer, src)} restored",
-                         lambda: self.kb.remap(layer, src, src), saved)
+                         lambda: control.restore_key(self.kb, self.state, layer, src),
+                         self.keys_changed)
 
     @on(Button.Pressed, "#reset-keys")
     def reset_keys(self):
-        def saved():
-            self.state["remaps"].clear()
-            self.state["macros"].clear()
-            self.refresh_remaps()
-            self.refresh_macros()
-
         def done(yes):
             if yes:
-                self.device_call("all keys reset", lambda: self.kb.reset_keys(), saved)
+                self.device_call("all keys reset",
+                                 lambda: control.reset_keys(self.kb, self.state),
+                                 self.keys_changed)
         self.push_screen(Confirm("Reset every remap and macro back to default?"), done)
 
     # -- macro -------------------------------------------------------------
@@ -835,14 +1037,14 @@ class AK820App(App):
 
     def macro_events(self):
         tokens = self.query_one("#macro-events", Input).value.split()
-        return parse_macro_events(tokens, 10) if tokens else []
+        return control.parse_macro_events(tokens) if tokens else []
 
     @on(Input.Changed, "#macro-events")
     def preview_macro(self):
         preview = self.query_one("#macro-preview", Static)
         try:
             events_ = self.macro_events()
-        except KeyError as e:
+        except (KeyError, ValueError) as e:
             preview.update(Text(str(e), style="red"))
             return
         text = Text()
@@ -865,12 +1067,68 @@ class AK820App(App):
             self.notify("pick a key on the map and enter some events", severity="warning")
             return
         layer, src = self.macro_layer(), self.macro_src
-
-        def saved():
-            self.state["macros"][f"{layer}:{src}"] = {"events": raw, "repeat": repeat}
-            self.refresh_macros()
         self.device_call(f"macro on {key_label(layer, src)} ({len(events_)} events)",
-                         lambda: self.kb.set_macro(layer, src, events_, repeat), saved)
+                         lambda: control.set_macro(self.kb, self.state, layer, src, raw, repeat),
+                         self.keys_changed)
+
+    # -- music -------------------------------------------------------------
+
+    @on(Button.Pressed, "#music-start")
+    def music_start(self):
+        if self.visualizer and self.visualizer.running:
+            return
+        from .music import AudioError, Visualizer
+        color = None if self.query_one("#music-color", Select).value == "rainbow" else self.brush
+        sensitivity = 0.4 + 0.3 * self.query_one("#music-sens-level", LevelPicker).value
+        kb = None if (self.dry_run or self.kb is None) else self.kb
+        try:
+            self.visualizer = Visualizer(kb, self.query_one("#music-style", Select).value,
+                                         color, 30, sensitivity, on_frame=self.music_frame,
+                                         on_error=self.music_error)
+            with self.lock:
+                self.visualizer.start()
+        except (AudioError, DeviceError, OSError) as e:
+            self.notify(str(e), title="music sync", severity="error", timeout=8)
+            self.visualizer = None
+            return
+        self.query_one("#music-start").disabled = True
+        self.query_one("#music-stop").disabled = False
+        self.notify("music sync running")
+
+    def music_frame(self, frame, levels):
+        def show():
+            self.query_one("#music-preview", KeyboardPreview).show(frame)
+            self.query_one("#music-bars", Static).update(Text(
+                "".join(" ▁▂▃▄▅▆▇█"[min(8, int(lv * 8.99))] * 3 for lv in levels),
+                style="bold magenta"))
+        try:
+            self.call_from_thread(show)
+        except RuntimeError:
+            pass
+
+    def music_error(self, error):
+        try:
+            self.call_from_thread(self.notify, str(error), title="music sync",
+                                  severity="error")
+            self.call_from_thread(self.music_stop)
+        except RuntimeError:
+            pass
+
+    @on(Button.Pressed, "#music-stop")
+    def music_stop(self):
+        if self.visualizer:
+            self.visualizer.stop()
+            self.visualizer = None
+        self.query_one("#music-start").disabled = False
+        self.query_one("#music-stop").disabled = True
+        if self.kb is not None and not self.state.get("lights_off"):
+            self.device_call("music sync stopped, lighting restored",
+                             lambda: control.lights_on(self.kb, self.state))
+
+    @on(Select.Changed, "#music-style")
+    def music_style(self, event: Select.Changed):
+        if self.visualizer:
+            self.visualizer.renderer.style = event.value
 
     # -- settings ----------------------------------------------------------
 
@@ -880,29 +1138,22 @@ class AK820App(App):
 
     @on(Button.Pressed, "#apply-settings")
     def apply_settings(self):
-        settings = {"sleep": self.radio_value("#sleep"),
-                    "response": self.radio_value("#response"),
-                    "fn": self.radio_value("#fnswitch") == 1}
-
-        def send():
-            self.kb.set_sleep(settings["sleep"])
-            self.kb.set_response(settings["response"])
-            self.kb.set_fn_switch(settings["fn"])
-        self.device_call(f"settings: sleep {SLEEP_LABELS[settings['sleep'] - 1]}, "
-                         f"gear {settings['response']}, "
-                         f"fn {'on' if settings['fn'] else 'off'}",
-                         send, lambda: self.state.update(settings=settings))
+        sleep, response = self.radio_value("#sleep"), self.radio_value("#response")
+        fn = self.radio_value("#fnswitch") == 1
+        self.device_call(f"settings: sleep {SLEEP_LABELS[sleep - 1]}, gear {response}, "
+                         f"fn {'on' if fn else 'off'}",
+                         lambda: control.apply_settings(self.kb, self.state, sleep, response, fn))
 
     @on(Button.Pressed, "#factory")
     def factory(self):
         def saved():
-            self.state.update(state.default_state())
-            self.refresh_remaps()
-            self.refresh_macros()
+            self.keys_changed()
+            self.show_lights_state()
 
         def done(yes):
             if yes:
-                self.device_call("factory reset", lambda: self.kb.factory_reset(), saved)
+                self.device_call("factory reset",
+                                 lambda: control.factory_reset(self.kb, self.state), saved)
         self.push_screen(Confirm("Restore factory settings? Everything stored on the "
                                  "keyboard gets erased."), done)
 

@@ -1,4 +1,4 @@
-# AJAZZ AK820 Max Plus: give the logged-in user access to the hidraw nodes
-# (wired 1a2c:a036, 2.4G dongle 1a2c:8fff).
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1a2c", ATTRS{idProduct}=="a036", TAG+="uaccess"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1a2c", ATTRS{idProduct}=="8fff", TAG+="uaccess"
+# AJAZZ AK820 Max Plus: let the logged-in user open the vendor config interface
+# (USB interface 0) only. The typing interfaces stay root-only, so nothing can
+# read keystrokes through this rule. Wired 1a2c:a036, 2.4G dongle 1a2c:8fff.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1a2c", ATTRS{idProduct}=="a036|8fff", DEVPATH=="*:1.0/*", TAG+="uaccess"

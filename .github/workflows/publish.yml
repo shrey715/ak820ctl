@@ -1,8 +1,10 @@
 name: publish
 
-# Runs on every push to main. Uploads to PyPI only when the version in
-# ak820/__init__.py isn't on PyPI yet, so bumping the version = a release.
-# Auth is PyPI trusted publishing (OIDC): no token is stored anywhere.
+# Runs on every push to main. Releases only when the version in
+# ak820/__init__.py isn't on PyPI yet, so bumping the version = a release:
+# PyPI upload (trusted publishing, no token stored anywhere), an AppImage,
+# and a GitHub release with install notes. The web app deploys separately
+# through Vercel's git integration.
 
 on:
   push:
@@ -17,7 +19,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: pip install -e ".[dev]"
+      - run: pip install -e ".[dev,music]"
       - run: pytest -q
 
   publish:
@@ -53,8 +55,43 @@ jobs:
         if: steps.version.outputs.new == 'true'
         uses: pypa/gh-action-pypi-publish@release/v1
 
+      - name: build appimage
+        if: steps.version.outputs.new == 'true'
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+        run: |
+          mkdir -p release
+          mv dist/* release/
+          packaging/appimage/build.sh
+          mv dist/*.AppImage release/
+
       - name: github release
         if: steps.version.outputs.new == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "v${{ steps.version.outputs.version }}" dist/* --generate-notes
+          V: ${{ steps.version.outputs.version }}
+        run: |
+          cat > notes.md <<EOF
+          ## Get it
+
+          **No install:** open **https://ak820ctl.vercel.app** in Chrome, Edge or Opera on a computer.
+
+          **Terminal (CLI + TUI):**
+          \`\`\`sh
+          pipx install 'ak820ctl[music]'      # or
+          uv tool install 'ak820ctl[music]'   # or
+          pip install --user 'ak820ctl[music]'
+          \`\`\`
+
+          **AppImage (Linux, nothing else needed):**
+          \`\`\`sh
+          curl -LO https://github.com/${{ github.repository }}/releases/download/v$V/ak820ctl-$V-x86_64.AppImage
+          chmod +x ak820ctl-$V-x86_64.AppImage && ./ak820ctl-$V-x86_64.AppImage
+          \`\`\`
+
+          On Linux, run \`ak820ctl udev --install\` once so you don't need sudo.
+          Unofficial, not affiliated with AJAZZ.
+
+          EOF
+          sed -i 's/^          //' notes.md
+          gh release create "v$V" release/* --title "v$V" --notes-file notes.md --generate-notes

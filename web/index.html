@@ -1,0 +1,319 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>AK820 Control</title>
+  <meta name="description" content="Unofficial browser control panel for the AJAZZ AK820 Max Plus: lighting effects, per-key RGB, remaps, macros and music sync. No install.">
+  <meta name="theme-color" content="#0b0c10">
+  <meta property="og:title" content="AK820 Control">
+  <meta property="og:description" content="Control your AJAZZ AK820 Max Plus from the browser. Unofficial.">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+  <script type="module" src="app.js"></script>
+</head>
+<body>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 22a10 10 0 1 1 10-10c0 2.8-2.2 4-4 4h-2a2 2 0 0 0-1.5 3.3A2 2 0 0 1 12 22z"/><circle cx="7.5" cy="10.5" r="1.2"/><circle cx="12" cy="7" r="1.2"/><circle cx="16.5" cy="10.5" r="1.2"/></symbol>
+    <symbol id="i-keys" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></symbol>
+    <symbol id="i-macro" viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></symbol>
+    <symbol id="i-music" viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+    <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 2v10M18.4 6.6a9 9 0 1 1-12.8 0"/></symbol>
+    <symbol id="i-usb" viewBox="0 0 24 24"><path d="M12 2v14M8 6l4-4 4 4M7 12v3a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2v-3"/><circle cx="12" cy="19.5" r="2.5"/></symbol>
+    <symbol id="i-brush" viewBox="0 0 24 24"><path d="m9.1 11.6 8.5-8.5a2.1 2.1 0 0 1 3 3l-8.5 8.5"/><path d="M7 14c-1.7 0-3 1.3-3 3 0 1.3-1 2-2 2 1 1.5 3 2 4.5 2 2.5 0 4.5-2 4.5-4.5 0-1.4-1.1-2.5-2.5-2.5z"/></symbol>
+    <symbol id="i-drop" viewBox="0 0 24 24"><path d="m2 22 1-1h3l9-9M3 21v-3l9-9"/><path d="m15 6 3.4-3.4a2.1 2.1 0 1 1 3 3L18 9l.4.4a2.1 2.1 0 1 1-3 3l-3.8-3.8a2.1 2.1 0 1 1 3-3l.4.4z"/></symbol>
+    <symbol id="i-select" viewBox="0 0 24 24"><path d="M5 3a2 2 0 0 0-2 2M19 3a2 2 0 0 1 2 2M21 19a2 2 0 0 1-2 2M5 21a2 2 0 0 1-2-2M9 3h1M9 21h1M14 3h1M14 21h1M3 9v1M21 9v1M3 14v1M21 14v1"/></symbol>
+    <symbol id="i-undo" viewBox="0 0 24 24"><path d="M3 7v6h6"/><path d="M21 17a9 9 0 0 0-15-6.7L3 13"/></symbol>
+    <symbol id="i-redo" viewBox="0 0 24 24"><path d="M21 7v6h-6"/><path d="M3 17a9 9 0 0 1 15-6.7l3 2.7"/></symbol>
+    <symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></symbol>
+    <symbol id="i-github" viewBox="0 0 24 24"><path d="M9 19c-5 1.5-5-2.5-7-3m14 6v-3.9a3.4 3.4 0 0 0-.9-2.6c3.1-.3 6.4-1.5 6.4-7A5.4 5.4 0 0 0 20 4.8 5 5 0 0 0 19.9 1S18.7.7 16 2.5a13.4 13.4 0 0 0-7 0C6.3.7 5.1 1 5.1 1A5 5 0 0 0 5 4.8a5.4 5.4 0 0 0-1.5 3.7c0 5.4 3.3 6.6 6.4 7a3.4 3.4 0 0 0-.9 2.6V22"/></symbol>
+  </svg>
+
+  <div class="app">
+    <aside class="sidebar">
+      <a class="brand" href="./">
+        <img src="icon.svg" alt="" width="34" height="34">
+        <span><strong>AK820</strong><em>control</em></span>
+      </a>
+      <nav class="nav" role="tablist">
+        <button data-tab="light" class="active"><svg><use href="#i-sun"/></svg><span>Lighting</span></button>
+        <button data-tab="rgb"><svg><use href="#i-palette"/></svg><span>Per-key</span></button>
+        <button data-tab="remap"><svg><use href="#i-keys"/></svg><span>Remap</span></button>
+        <button data-tab="macro"><svg><use href="#i-macro"/></svg><span>Macros</span></button>
+        <button data-tab="music"><svg><use href="#i-music"/></svg><span>Music</span></button>
+        <button data-tab="settings"><svg><use href="#i-gear"/></svg><span>Settings</span></button>
+      </nav>
+      <div class="sidebar-foot">
+        <a href="https://github.com/shrey715/ak820ctl" target="_blank" rel="noopener"><svg><use href="#i-github"/></svg>source</a>
+        <span id="version" class="muted"></span>
+      </div>
+    </aside>
+
+    <div class="main">
+      <header class="topbar">
+        <div>
+          <h1 id="page-title">Lighting</h1>
+          <p id="page-sub" class="muted">Pick an effect, it applies right away.</p>
+        </div>
+        <div class="top-actions">
+          <span id="sync" class="sync"></span>
+          <div id="device" class="device">
+            <span class="dot"></span>
+            <span id="device-name">Not connected</span>
+            <span id="battery" class="battery hidden"><span class="cell"><i></i></span><b></b></span>
+          </div>
+          <button id="lights" class="icon-btn" title="Lights on / off (o)"><svg><use href="#i-power"/></svg></button>
+          <button id="connect" class="btn primary"><svg><use href="#i-usb"/></svg><span>Connect</span></button>
+        </div>
+      </header>
+
+      <section id="welcome" class="welcome hidden">
+        <div>
+          <h2>Connect your AK820 Max Plus</h2>
+          <p>Plug in the USB cable or the 2.4G dongle, then press <b>Connect</b> and pick the keyboard.
+            Nothing to install. Your settings live on the keyboard.</p>
+          <p id="welcome-note" class="muted small"></p>
+        </div>
+        <div class="welcome-actions">
+          <button id="welcome-connect" class="btn primary lg"><svg><use href="#i-usb"/></svg>Connect keyboard</button>
+          <button id="demo" class="btn ghost">Try the demo</button>
+        </div>
+      </section>
+
+      <section class="stage">
+        <canvas id="stage" aria-label="keyboard"></canvas>
+        <div id="stage-hint" class="stage-hint"></div>
+      </section>
+
+      <!-- LIGHTING -->
+      <section id="tab-light" class="panel active">
+        <div class="cards two">
+          <div class="card">
+            <div class="card-head"><h3>Effects</h3><span id="effect-name" class="muted"></span></div>
+            <div id="gallery" class="gallery"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Tune</h3></div>
+            <div class="field">
+              <label for="brightness">Brightness</label>
+              <div class="slider"><input type="range" id="brightness" min="1" max="5"><output></output></div>
+            </div>
+            <div class="field">
+              <label for="speed">Speed</label>
+              <div class="slider"><input type="range" id="speed" min="1" max="5"><output></output></div>
+            </div>
+            <div class="field">
+              <label>Direction</label>
+              <div class="seg" id="direction">
+                <button data-v="0">→ left to right</button>
+                <button data-v="1">← right to left</button>
+              </div>
+            </div>
+            <div class="field">
+              <label>Colour</label>
+              <div id="palette" class="swatches"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- PER-KEY -->
+      <section id="tab-rgb" class="panel">
+        <div class="toolbar card">
+          <div class="seg icons" id="tool">
+            <button data-tool="paint" class="active" title="Paint (click or drag)"><svg><use href="#i-brush"/></svg>Paint</button>
+            <button data-tool="pick" title="Pick a key's colour"><svg><use href="#i-drop"/></svg>Pick</button>
+            <button data-tool="select" title="Select keys for patterns"><svg><use href="#i-select"/></svg>Select</button>
+          </div>
+          <div class="tool-sep"></div>
+          <div id="swatches" class="swatches small"></div>
+          <label class="color-chip" title="Brush colour"><input type="color" id="brush" value="#ff3d77"><span>Brush</span></label>
+          <label class="color-chip" title="Second colour, for gradients"><input type="color" id="brush2" value="#3d7bff"><span>Second</span></label>
+          <div class="tool-sep"></div>
+          <button id="undo" class="icon-btn" title="Undo (ctrl+z)"><svg><use href="#i-undo"/></svg></button>
+          <button id="redo" class="icon-btn" title="Redo (ctrl+y)"><svg><use href="#i-redo"/></svg></button>
+        </div>
+        <div class="cards three">
+          <div class="card">
+            <div class="card-head"><h3>Patterns</h3><span class="muted small" id="sel-count"></span></div>
+            <div id="patterns" class="chips"></div>
+            <button id="clear-sel" class="btn ghost sm">Clear selection</button>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Presets</h3></div>
+            <div class="inline">
+              <input id="preset-name" placeholder="name your design">
+              <button id="save-preset" class="btn sm">Save</button>
+            </div>
+            <div id="preset-list" class="preset-list"></div>
+            <div class="inline">
+              <button id="export" class="btn ghost sm">Export file</button>
+              <label class="btn ghost sm">Import file<input type="file" id="import" accept=".json" hidden></label>
+            </div>
+          </div>
+          <div class="card accent">
+            <div class="card-head"><h3>Send to keyboard</h3></div>
+            <label class="switch"><input type="checkbox" id="live-rgb"><span></span>Live preview on keyboard</label>
+            <p class="muted small">Live mirrors every stroke without saving. Upload stores the design on the keyboard.</p>
+            <button id="upload" class="btn primary block"><svg><use href="#i-upload"/></svg>Upload design</button>
+            <span id="dirty" class="dirty"></span>
+          </div>
+        </div>
+      </section>
+
+      <!-- REMAP -->
+      <section id="tab-remap" class="panel">
+        <div class="cards two">
+          <div class="card">
+            <div class="card-head"><h3>Change a key</h3>
+              <label class="switch sm"><input type="checkbox" id="remap-fn"><span></span>Fn layer</label></div>
+            <div class="picked">
+              <div id="remap-cap" class="keycap empty">?</div>
+              <div class="arrow">→</div>
+              <input id="remap-target" list="targets" placeholder="search a function: esc, volup, f13…">
+            </div>
+            <datalist id="targets"></datalist>
+            <div id="quick-targets" class="chips"></div>
+            <div class="inline">
+              <button id="apply-remap" class="btn primary">Apply</button>
+              <button id="restore-key" class="btn ghost">Restore default</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Your remaps</h3>
+              <button id="reset-keys" class="btn danger sm">Reset all</button></div>
+            <ul id="remap-list" class="rows"></ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- MACRO -->
+      <section id="tab-macro" class="panel">
+        <div class="cards two">
+          <div class="card">
+            <div class="card-head"><h3>Record a macro</h3>
+              <label class="switch sm"><input type="checkbox" id="macro-fn"><span></span>Fn layer</label></div>
+            <div class="picked">
+              <div id="macro-cap" class="keycap empty">?</div>
+              <div class="arrow">⚡</div>
+              <input id="macro-events" placeholder="+lctrl c -lctrl" spellcheck="false">
+            </div>
+            <p class="muted small"><code>+key</code> press · <code>-key</code> release · <code>key</code> tap · <code>@ms</code> delay after</p>
+            <div id="macro-preview" class="timeline"></div>
+            <div class="inline">
+              <label class="mini">repeat <input id="macro-repeat" type="number" min="1" max="255" value="1"></label>
+              <button id="apply-macro" class="btn primary">Store macro</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Your macros</h3></div>
+            <ul id="macro-list" class="rows"></ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- MUSIC -->
+      <section id="tab-music" class="panel">
+        <div class="cards two">
+          <div class="card">
+            <div class="card-head"><h3>Music sync</h3><span id="music-state" class="muted small">stopped</span></div>
+            <div class="field">
+              <label>Listen to</label>
+              <div class="seg" id="music-source">
+                <button data-v="display" class="active">Tab / screen audio</button>
+                <button data-v="mic">Microphone</button>
+              </div>
+            </div>
+            <div class="field">
+              <label>Style</label>
+              <div class="seg" id="music-style">
+                <button data-v="spectrum" class="active">Spectrum</button>
+                <button data-v="pulse">Pulse</button>
+                <button data-v="wave">Wave</button>
+              </div>
+            </div>
+            <div class="field">
+              <label>Colour</label>
+              <div class="seg" id="music-color">
+                <button data-v="rainbow" class="active">Rainbow</button>
+                <button data-v="brush">Brush colour</button>
+              </div>
+            </div>
+            <div class="field">
+              <label for="music-sens">Sensitivity</label>
+              <div class="slider"><input type="range" id="music-sens" min="1" max="5" value="3"><output></output></div>
+            </div>
+            <button id="music-toggle" class="btn primary block lg"><svg><use href="#i-music"/></svg><span>Start</span></button>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Levels</h3></div>
+            <canvas id="music-bars" class="bars"></canvas>
+            <p class="muted small">For tab audio, pick the tab in the share dialog and keep <b>Share tab audio</b> on.
+              Whole-screen system audio works on Windows and ChromeOS.</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- SETTINGS -->
+      <section id="tab-settings" class="panel">
+        <div class="cards three">
+          <div class="card">
+            <div class="card-head"><h3>Sleep after</h3></div>
+            <div class="seg vertical" id="sleep">
+              <button data-v="1">5 minutes</button><button data-v="2">15 minutes</button>
+              <button data-v="3">30 minutes</button><button data-v="4">Never</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Key response</h3></div>
+            <div class="seg vertical" id="response">
+              <button data-v="1">Gear 1 · fastest</button><button data-v="2">Gear 2</button><button data-v="3">Gear 3</button>
+            </div>
+            <label class="switch"><input type="checkbox" id="fn-switch"><span></span>Fn switch</label>
+            <p class="muted small">The Fn switch had no visible effect in hardware tests so far.</p>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Keyboard</h3></div>
+            <button id="factory" class="btn danger block">Restore factory settings</button>
+            <details class="log">
+              <summary>Packet log</summary>
+              <pre id="log"></pre>
+            </details>
+          </div>
+        </div>
+        <div class="card about">
+          <h3>About</h3>
+          <p>Unofficial, not affiliated with AJAZZ. Works in <b>Chrome, Edge or Opera on a computer</b>
+            (Windows, macOS, Linux, ChromeOS) over the USB cable or the 2.4G dongle. Phones, Safari and
+            Firefox don't support WebHID, and the keyboard doesn't expose its settings over Bluetooth.</p>
+          <p>On Linux, allow your user to open the keyboard once:
+            <code class="copy" id="udev-cmd">curl -fsSL https://raw.githubusercontent.com/shrey715/ak820ctl/main/udev/70-ajazz-ak820.rules | sudo tee /etc/udev/rules.d/70-ajazz-ak820.rules && sudo udevadm control --reload && sudo udevadm trigger</code></p>
+          <p>The keyboard can't report its settings back, so this page remembers what it last sent, in your browser.
+            Prefer the terminal? <a href="https://github.com/shrey715/ak820ctl#install">ak820ctl</a> has a CLI, a TUI and an AppImage.</p>
+        </div>
+      </section>
+    </div>
+
+    <nav class="bottom-nav" role="tablist"></nav>
+  </div>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <dialog id="confirm">
+    <form method="dialog">
+      <h3 id="confirm-title">Are you sure?</h3>
+      <p id="confirm-text" class="muted"></p>
+      <div class="inline end">
+        <button value="no" class="btn ghost">Cancel</button>
+        <button value="yes" class="btn danger">Yes, do it</button>
+      </div>
+    </form>
+  </dialog>
+</body>
+</html>

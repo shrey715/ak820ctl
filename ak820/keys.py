@@ -15,6 +15,7 @@ HID_USAGES = {
     "backslash": 0x31, "semicolon": 0x33, "quote": 0x34, "grave": 0x35,
     "comma": 0x36, "period": 0x37, "slash": 0x38, "capslock": 0x39,
     **{f"f{i}": 0x3A + i - 1 for i in range(1, 13)},
+    **{f"f{i}": 0x68 + i - 13 for i in range(13, 25)},
     "printscreen": 0x46, "scrolllock": 0x47, "pause": 0x48, "insert": 0x49,
     "home": 0x4A, "pageup": 0x4B, "delete": 0x4C, "end": 0x4D, "pagedown": 0x4E,
     "right": 0x4F, "left": 0x50, "down": 0x51, "up": 0x52, "numlock": 0x53,
@@ -81,6 +82,35 @@ PHYSICAL_KEYS = [
 
 LED_BY_CODE = {code: led for code, _, led, _, _ in PHYSICAL_KEYS}
 
+# Vendor UI rectangles (x, y, w, h on an 800x300 canvas), keyed by LED index.
+KEY_RECTS = {
+    15: (29, 41, 34, 34), 14: (71, 41, 34, 34), 13: (103, 41, 34, 34), 12: (136, 41, 34, 34),
+    11: (169, 41, 34, 34), 10: (210, 41, 34, 34), 9: (243, 41, 34, 34), 8: (276, 41, 34, 34),
+    7: (307, 41, 34, 34), 6: (350, 41, 34, 34), 5: (383, 41, 34, 34), 4: (416, 41, 34, 34),
+    3: (448, 41, 34, 34), 43: (489, 41, 34, 34), 16: (30, 81, 34, 34), 17: (63, 81, 34, 34),
+    18: (95, 81, 34, 34), 19: (128, 81, 34, 34), 20: (161, 81, 34, 34), 21: (194, 81, 34, 34),
+    22: (227, 81, 34, 34), 23: (260, 81, 34, 34), 24: (292, 81, 34, 34), 25: (325, 81, 34, 34),
+    26: (358, 81, 34, 34), 27: (390, 81, 34, 34), 28: (424, 81, 34, 34), 29: (457, 81, 65, 34),
+    31: (537, 81, 34, 34), 57: (30, 114, 51, 34), 56: (79, 114, 34, 34), 55: (112, 114, 34, 34),
+    54: (144, 114, 34, 34), 53: (177, 114, 34, 34), 52: (210, 114, 34, 34),
+    51: (243, 114, 34, 34), 50: (276, 114, 34, 34), 49: (309, 114, 34, 34),
+    48: (341, 114, 34, 34), 47: (375, 114, 34, 34), 46: (407, 114, 34, 34),
+    45: (439, 114, 34, 34), 44: (473, 114, 51, 34), 32: (537, 114, 34, 34),
+    58: (30, 148, 54, 34), 59: (88, 148, 34, 34), 60: (120, 148, 34, 34), 61: (153, 148, 34, 34),
+    62: (186, 148, 34, 34), 63: (219, 148, 34, 34), 64: (252, 148, 34, 34),
+    65: (284, 148, 34, 34), 66: (317, 148, 34, 34), 67: (351, 148, 34, 34),
+    68: (383, 148, 34, 34), 69: (416, 148, 34, 34), 70: (449, 148, 74, 34),
+    41: (537, 146, 34, 34), 90: (30, 180, 74, 34), 89: (103, 180, 34, 34),
+    88: (137, 180, 34, 34), 87: (169, 180, 34, 34), 86: (202, 180, 34, 34),
+    85: (235, 180, 34, 34), 84: (267, 180, 34, 34), 83: (300, 180, 34, 34),
+    82: (333, 180, 34, 34), 81: (366, 180, 34, 34), 80: (399, 180, 34, 34),
+    79: (432, 180, 54, 34), 78: (497, 186, 34, 34), 42: (537, 180, 34, 34),
+    91: (31, 212, 42, 34), 92: (71, 212, 42, 34), 93: (111, 212, 42, 34),
+    94: (153, 212, 208, 34), 95: (357, 212, 34, 34), 97: (390, 212, 34, 34),
+    98: (424, 212, 34, 34), 99: (464, 220, 31, 34), 100: (496, 220, 31, 34),
+    101: (530, 220, 31, 34),
+}
+
 # Lighting modes enabled in kb-k600t.xml.  attribute bits: 1 brightness,
 # 2 speed, 4 direction, 64 colour, 256 custom per-key, 512/1024 host-driven.
 ATTR_BRIGHTNESS, ATTR_SPEED, ATTR_DIRECTION, ATTR_COLOR = 1, 2, 4, 64
@@ -96,8 +126,63 @@ LIGHT_MODES = {
     22: ("Music rhythm (host driven)", 512), 23: ("Screen rhythm (host driven)", 1024),
     24: ("Custom per-key", 256),
 }
-CUSTOM_MODE = 24
+# Short names for the CLI (same slugs as prasoondev/ajazz-linux).
+EFFECT_SLUGS = {
+    "ripple-lr": 1, "starry": 2, "ripple-ud": 3, "ejection": 4, "spectrum": 5,
+    "kaleidoscope": 6, "static": 7, "breathing": 8, "cross": 9, "key-breathing": 11,
+    "scroll": 12, "top-bottom": 15, "rain": 16, "windmill": 17, "sine": 18,
+    "galloping": 19, "music": 22, "screen": 23, "custom": 24,
+}
+SLUG_BY_MODE = {mode: slug for slug, mode in EFFECT_SLUGS.items()}
+CUSTOM_MODE, MUSIC_MODE, SCREEN_MODE = 24, 22, 23
 DEFAULT_BRIGHTNESS, DEFAULT_SPEED, MAX_LEVEL = 5, 4, 5
+
+# Fixed effect palette, colorindex 0..7 (vendor buttons 0x58..0x5F).
+# Confirmed on hardware by prasoondev/ajazz-linux.
+PALETTE = [
+    ("red", (255, 0, 0)), ("green", (0, 255, 0)), ("blue", (0, 0, 255)),
+    ("yellow", (255, 255, 0)), ("magenta", (255, 0, 255)), ("cyan", (0, 255, 255)),
+    ("white", (255, 255, 255)), ("rainbow", None),
+]
+PALETTE_INDEX = {name: i for i, (name, _) in enumerate(PALETTE)}
+RAINBOW = PALETTE_INDEX["rainbow"]
+DIRECTIONS = {"left-to-right": 0, "right-to-left": 1}  # hardware-verified
+
+# Status reply byte 6 (hardware-verified by prasoondev/ajazz-linux).
+POWER_STATES = {0: "no keyboard / no data", 1: "charging", 2: "on battery",
+                3: "fully charged"}
+
+
+def effect_mode(name: str) -> int:
+    """Lighting mode from a slug ('breathing'), a number ('8') or a name prefix."""
+    n = name.strip().lower()
+    if n.isdigit():
+        return int(n)
+    if n in EFFECT_SLUGS:
+        return EFFECT_SLUGS[n]
+    hits = [m for m, (title, _) in LIGHT_MODES.items() if title.lower().startswith(n)]
+    if len(hits) == 1:
+        return hits[0]
+    raise KeyError(f"unknown effect '{name}' (try `ak820ctl modes`)")
+
+
+def palette_index(name: str) -> int:
+    n = name.strip().lower()
+    if n.isdigit() and int(n) < len(PALETTE):
+        return int(n)
+    if n in PALETTE_INDEX:
+        return PALETTE_INDEX[n]
+    raise KeyError(f"unknown palette colour '{name}' "
+                   f"({', '.join(PALETTE_INDEX)})")
+
+
+def direction_value(name: str) -> int:
+    n = name.strip().lower()
+    aliases = {"0": 0, "1": 1, "ltr": 0, "rtl": 1, "right": 0, "left": 1,
+               "left-to-right": 0, "right-to-left": 1}
+    if n not in aliases:
+        raise KeyError(f"unknown direction '{name}' (left-to-right / right-to-left)")
+    return aliases[n]
 
 
 def _norm(name: str) -> str:

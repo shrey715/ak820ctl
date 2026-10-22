@@ -9,3 +9,8 @@ dist/
 # vendor driver package, not ours to redistribute
 *.rar
 *.exe
+
+.env.local
+
+# vercel cli link data
+.vercel

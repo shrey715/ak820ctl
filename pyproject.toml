@@ -5,25 +5,31 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "ak820ctl"
 dynamic = ["version"]
-description = "unofficial linux driver for the ajazz ak820 max plus keyboard (rgb, keymaps, macros, battery)"
+description = "Unofficial control for the AJAZZ AK820 Max Plus keyboard: lighting, per-key RGB, remaps, macros, music sync. CLI + TUI."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [{ name = "Shreyas Deb", email = "shreyasdeb@gmail.com" }]
 requires-python = ">=3.9"
 dependencies = ["rich>=12", "textual>=3.0"]
-keywords = ["ajazz", "ak820", "keyboard", "rgb", "hid", "linux", "tui"]
+keywords = ["ajazz", "ak820", "ak820 max", "keyboard", "rgb", "hid", "hidraw", "linux", "tui", "macro"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Environment :: Console",
+    "Environment :: Console :: Curses",
     "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
     "Topic :: System :: Hardware :: Hardware Drivers",
+    "Topic :: Multimedia :: Sound/Audio :: Analysis",
 ]
 
 [project.urls]
+"Web app" = "https://ak820ctl.vercel.app"
 Homepage = "https://github.com/shrey715/ak820ctl"
+Releases = "https://github.com/shrey715/ak820ctl/releases"
 Issues = "https://github.com/shrey715/ak820ctl/issues"
 Protocol = "https://github.com/shrey715/ak820ctl/blob/main/PROTOCOL.md"
 
@@ -31,6 +37,7 @@ Protocol = "https://github.com/shrey715/ak820ctl/blob/main/PROTOCOL.md"
 ak820ctl = "ak820.cli:main"
 
 [project.optional-dependencies]
+music = ["numpy>=1.21"]
 dev = ["pytest"]
 
 [tool.setuptools]

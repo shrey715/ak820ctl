@@ -3,20 +3,24 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
+import time
 
 from rich import box
 from rich.console import Console, Group
+from rich.live import Live
 from rich.panel import Panel
 from rich.progress_bar import ProgressBar
-from rich.prompt import Confirm, IntPrompt, Prompt
+from rich.prompt import Confirm
 from rich.table import Table
 from rich.text import Text
 
-from . import __version__, keys
+from . import __version__, control, keys, state
 from .protocol import DeviceError, Keyboard, find_interfaces
 
 console = Console()
+err_console = Console(stderr=True)  # packet logs stay out of --json output
 
 NAMED_COLORS = {
     "off": (0, 0, 0), "black": (0, 0, 0), "white": (255, 255, 255),
@@ -25,7 +29,10 @@ NAMED_COLORS = {
     "purple": (128, 0, 255), "orange": (255, 128, 0), "pink": (255, 105, 180),
 }
 SLEEP_OPTIONS = {"5": 1, "15": 2, "30": 3, "never": 4}
-LINK_STATES = {0: "keyboard not linked", 1: "online (on battery)", 3: "online (charging)"}
+LINK_STATES = keys.POWER_STATES  # kept for older imports
+
+# re-exported for the TUI and older callers
+parse_macro_events = control.parse_macro_events
 
 
 def parse_color(s: str) -> tuple[int, int, int]:
@@ -33,15 +40,17 @@ def parse_color(s: str) -> tuple[int, int, int]:
     if s in NAMED_COLORS:
         return NAMED_COLORS[s]
     h = s.lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
     if len(h) != 6:
-        raise argparse.ArgumentTypeError(f"bad colour '{s}' (use RRGGBB or a name)")
+        raise argparse.ArgumentTypeError(f"bad colour '{s}' (use RRGGBB, RGB or a name)")
     return int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
 
 
 # -- rendering --------------------------------------------------------------
 
 def render_keyboard(colors: dict[int, tuple[int, int, int]] | None = None,
-                    highlight: set[int] | None = None) -> Panel:
+                    highlight: set[int] | None = None, title="AK820 Max Plus") -> Panel:
     """Draw the 75% layout; keys tinted by LED colour or highlighted by code."""
     rows: dict[int, list] = {}
     for code, legend, led, row, col in keys.PHYSICAL_KEYS:
@@ -63,15 +72,19 @@ def render_keyboard(colors: dict[int, tuple[int, int, int]] | None = None,
             line.append(label, style=style)
             line.append(" ")
         lines.append(line)
-    return Panel(Group(*lines), title="AK820 Max Plus", box=box.ROUNDED, expand=False)
+    return Panel(Group(*lines), title=title, box=box.ROUNDED, expand=False)
 
 
 def packet_logger(report: bytes):
-    console.print(Text("→ " + report.rstrip(b"\x00").hex(" "), style="dim cyan"))
+    err_console.print(Text("→ " + report.rstrip(b"\x00").hex(" "), style="dim cyan"))
 
 
 def ok(msg: str):
     console.print(f"[bold green]✓[/] {msg}")
+
+
+def emit_json(data):
+    print(json.dumps(data, indent=2))
 
 
 def open_keyboard(args) -> Keyboard:
@@ -79,66 +92,147 @@ def open_keyboard(args) -> Keyboard:
                     log=packet_logger if (args.verbose or args.dry_run) else None)
 
 
-# -- commands ---------------------------------------------------------------
+class Session:
+    """Opens the keyboard and the state file; saves state on success."""
+
+    def __init__(self, args):
+        self.args = args
+        self.st = state.load()
+
+    def __enter__(self):
+        self.kb = open_keyboard(self.args)
+        return self.kb, self.st
+
+    def __exit__(self, exc_type, *exc):
+        self.kb.close()
+        if exc_type is None and not self.args.dry_run:
+            state.save(self.st)
+
+
+# -- info commands ----------------------------------------------------------
 
 def cmd_devices(args):
+    found = find_interfaces()
+    if args.json:
+        emit_json([{"path": i.path, "connection": i.connection, "interface": i.interface,
+                    "control": i.is_control} for i in found])
+        return
     table = Table(title="Detected AK820 interfaces", box=box.SIMPLE_HEAVY)
     for col in ("hidraw", "connection", "usb interface", "role"):
         table.add_column(col)
-    for i in find_interfaces():
+    for i in found:
         table.add_row(i.path, i.connection, i.interface,
                       "[bold green]control[/]" if i.is_control else "[dim]input[/]")
-    if not table.rows:
+    if not found:
         console.print("[red]No AK820 Max Plus found.[/] Is the cable or dongle plugged in?")
     else:
         console.print(table)
 
 
-def show_status(kb: Keyboard):
+def show_status(kb: Keyboard, as_json=False):
     st = kb.status()
-    if st is None:
-        console.print(Panel("[red]No reply to status query[/]", title=kb.path))
+    if as_json:
+        emit_json(None if st is None else
+                  {"battery": st.battery, "power": st.power, "power_name": st.power_name,
+                   "device": kb.path})
         return
-    rows = [Text.assemble(("Link:    ", "bold"),
-                          LINK_STATES.get(st.link, f"unknown ({st.link})"))]
+    if st is None:
+        console.print(Panel("[red]No reply to status query[/] "
+                            "(asleep, or switched off behind the dongle?)", title=kb.path))
+        return
+    rows = [Text.assemble(("Power:   ", "bold"), st.power_name)]
     if st.online and st.battery is not None:
         colour = "green" if st.battery > 50 else "yellow" if st.battery > 20 else "red"
         rows.append(Text.assemble(("Battery: ", "bold"), (f"{st.battery:3d}%", colour)))
         rows.append(ProgressBar(total=100, completed=st.battery, width=30,
                                 complete_style=colour))
-    console.print(Panel(Group(*rows), title=f"Status · {kb.path}", expand=False))
+    title = f"Status · {kb.path}" + (" · simulated" if kb.dry_run else "")
+    console.print(Panel(Group(*rows), title=title, expand=False))
 
 
 def cmd_status(args):
     with open_keyboard(args) as kb:
-        show_status(kb)
+        show_status(kb, args.json)
 
 
 def cmd_modes(args):
-    table = Table(title="Lighting modes", box=box.SIMPLE_HEAVY)
-    for col in ("#", "name", "brightness", "speed", "direction", "colour"):
-        table.add_column(col, justify="center" if col != "name" else "left")
+    if args.json:
+        emit_json([{"mode": m, "name": n, "slug": keys.SLUG_BY_MODE.get(m),
+                    "brightness": bool(a & keys.ATTR_BRIGHTNESS),
+                    "speed": bool(a & keys.ATTR_SPEED),
+                    "direction": bool(a & keys.ATTR_DIRECTION),
+                    "color": bool(a & keys.ATTR_COLOR)}
+                   for m, (n, a) in keys.LIGHT_MODES.items()])
+        return
+    table = Table(title="Lighting effects", box=box.SIMPLE_HEAVY)
+    for col in ("#", "slug", "name", "bright", "speed", "dir", "colour"):
+        table.add_column(col, justify="left" if col in ("slug", "name") else "center")
     tick = lambda attr, bit: "[green]●[/]" if attr & bit else "[dim]·[/]"
     for num, (name, attr) in keys.LIGHT_MODES.items():
-        table.add_row(str(num), name, tick(attr, keys.ATTR_BRIGHTNESS),
-                      tick(attr, keys.ATTR_SPEED), tick(attr, keys.ATTR_DIRECTION),
-                      tick(attr, keys.ATTR_COLOR))
+        table.add_row(str(num), keys.SLUG_BY_MODE.get(num, ""), name,
+                      tick(attr, keys.ATTR_BRIGHTNESS), tick(attr, keys.ATTR_SPEED),
+                      tick(attr, keys.ATTR_DIRECTION), tick(attr, keys.ATTR_COLOR))
     console.print(table)
+    swatches = Text("colours: ")
+    for i, (name, rgb) in enumerate(keys.PALETTE):
+        style = "bold" if rgb is None else "black on rgb({},{},{})".format(*rgb)
+        swatches.append(f" {i} {name} ", style=style)
+        swatches.append(" ")
+    console.print(swatches)
+    console.print("[dim]directions: left-to-right (0), right-to-left (1)[/]")
 
+
+def cmd_keys(args):
+    if args.json:
+        emit_json({"keys": keys.HID_USAGES, "media": keys.MEDIA_CODES,
+                   "aliases": keys.ALIASES})
+        return
+    table = Table(title="Key names", box=box.SIMPLE, show_lines=False)
+    table.add_column("keys (for remap sources/targets, custom colours, macros)", max_width=70)
+    table.add_column("media (remap targets only)", max_width=40)
+    table.add_row(", ".join(keys.HID_USAGES), ", ".join(keys.MEDIA_CODES))
+    console.print(table)
+    console.print("[dim]aliases: " + ", ".join(f"{a}→{b}" for a, b in keys.ALIASES.items()) + "[/]")
+
+
+# -- lighting ---------------------------------------------------------------
 
 def cmd_light(args):
-    if args.mode not in keys.LIGHT_MODES:
-        console.print(f"[yellow]Mode {args.mode} is not listed by the vendor layout; "
-                      "sending anyway.[/]")
-    with open_keyboard(args) as kb:
-        kb.set_light(args.mode, args.brightness, args.speed, args.direction, args.color)
-    name = keys.LIGHT_MODES.get(args.mode, ("?", 0))[0]
-    ok(f"mode {args.mode} ({name}), brightness {args.brightness}, speed {args.speed}, "
-       f"direction {args.direction}, colour index {args.color}")
+    mode = keys.effect_mode(args.effect)
+    if mode not in keys.LIGHT_MODES:
+        console.print(f"[yellow]Mode {mode} isn't in the vendor list; sending anyway.[/]")
+    if mode in (keys.MUSIC_MODE, keys.SCREEN_MODE):
+        raise ValueError("music/screen modes are driven by the PC; use `ak820ctl music`")
+    with Session(args) as (kb, st):
+        prev = st["light"]
+        light = {"mode": mode,
+                 "brightness": args.brightness or prev["brightness"],
+                 "speed": args.speed or prev["speed"],
+                 "direction": keys.direction_value(args.direction) if args.direction
+                 else prev["direction"],
+                 "color": keys.palette_index(args.color) if args.color else prev["color"]}
+        control.apply_light(kb, st, light)
+    name = keys.LIGHT_MODES.get(mode, ("?", 0))[0]
+    ok(f"{name}: brightness {light['brightness']}, speed {light['speed']}, "
+       f"{'right-to-left' if light['direction'] else 'left-to-right'}, "
+       f"{keys.PALETTE[light['color']][0]}")
 
 
-def build_colors(args) -> dict[int, tuple[int, int, int]]:
-    colors = {}
+def cmd_lights(args):
+    with Session(args) as (kb, st):
+        if args.action == "off":
+            control.lights_off(kb, st)
+            on = False
+        elif args.action == "on":
+            control.lights_on(kb, st)
+            on = True
+        else:
+            on = control.toggle_lights(kb, st)
+    ok("lights on, previous lighting restored" if on else "lights off")
+
+
+def build_colors(args, base=None) -> dict[int, tuple[int, int, int]]:
+    colors = dict(base or {})
     if args.all:
         colors = {led: args.all for _, _, led, _, _ in keys.PHYSICAL_KEYS}
     for spec in args.keys:
@@ -151,75 +245,95 @@ def build_colors(args) -> dict[int, tuple[int, int, int]]:
 
 
 def cmd_custom(args):
-    colors = build_colors(args)
-    console.print(render_keyboard(colors))
-    with open_keyboard(args) as kb:
-        kb.set_custom_colors(colors, args.brightness)
+    with Session(args) as (kb, st):
+        base = None if args.fresh else state.colors_from_json(st["colors"])
+        colors = build_colors(args, base)
+        console.print(render_keyboard(colors))
+        control.upload_custom(kb, st, colors, args.brightness)
     ok(f"custom per-key colours stored ({len(colors)} keys)")
 
 
-def cmd_frame(args):
-    colors = build_colors(args)
-    console.print(render_keyboard(colors))
-    with open_keyboard(args) as kb:
-        kb.send_frame(colors)
-    ok("live frame sent (experimental, not persisted)")
+def cmd_music(args):
+    from .music import AudioError, BANDS, Visualizer
 
+    color = parse_color(args.color) if args.color else None
+    with Session(args) as (kb, st):
+        latest = {"frame": {}, "levels": [0.0] * BANDS}
+
+        def on_frame(frame, levels):
+            latest["frame"], latest["levels"] = frame, levels
+
+        errors = []
+        try:
+            viz = Visualizer(None if args.dry_run else kb, args.style, color, args.fps,
+                             args.sensitivity, on_frame=on_frame, on_error=errors.append)
+            viz.start()
+        except AudioError as e:
+            raise ValueError(str(e))
+        console.print(f"[bold]music sync[/] · {args.style} · Ctrl-C to stop")
+        try:
+            with Live(console=console, refresh_per_second=15) as live:
+                while viz.running:
+                    bars = Text("".join(" ▁▂▃▄▅▆▇█"[min(8, int(l * 8.99))]
+                                        for l in latest["levels"]), style="bold magenta")
+                    live.update(Group(render_keyboard(latest["frame"], title="live"), bars))
+                    time.sleep(1 / 15)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            viz.stop()
+        if errors:
+            raise ValueError(str(errors[0]))
+        if not st.get("lights_off"):
+            control.lights_on(kb, st)  # put the stored lighting back right away
+    ok("music sync stopped, lighting restored")
+
+
+# -- settings / keys --------------------------------------------------------
 
 def cmd_sleep(args):
-    with open_keyboard(args) as kb:
-        kb.set_sleep(SLEEP_OPTIONS[args.minutes])
+    with Session(args) as (kb, st):
+        s = st["settings"]
+        control.apply_settings(kb, st, SLEEP_OPTIONS[args.minutes], s["response"], s["fn"])
     ok(f"sleep timer: {args.minutes}{'' if args.minutes == 'never' else ' min'}")
 
 
 def cmd_response(args):
-    with open_keyboard(args) as kb:
-        kb.set_response(args.gear)
+    with Session(args) as (kb, st):
+        s = st["settings"]
+        control.apply_settings(kb, st, s["sleep"], args.gear, s["fn"])
     ok(f"key response time: gear {args.gear}")
 
 
 def cmd_fn_switch(args):
-    with open_keyboard(args) as kb:
-        kb.set_fn_switch(args.mode == "fn")
-    ok(f"Fn switch: {args.mode}")
+    with Session(args) as (kb, st):
+        s = st["settings"]
+        control.apply_settings(kb, st, s["sleep"], s["response"], args.mode == "fn")
+    ok(f"Fn switch: {args.mode} [dim](no visible effect seen on hardware so far)[/]")
 
 
 def cmd_remap(args):
-    if args.list_targets:
-        table = Table(title="Remap targets", box=box.SIMPLE)
-        table.add_column("keys (HID)")
-        table.add_column("media")
-        table.add_row(", ".join(sorted(keys.HID_USAGES)), ", ".join(keys.MEDIA_CODES))
-        console.print(table)
-        return
-    if not (args.src and args.dst):
-        raise SystemExit("remap needs SRC and DST (or --list-targets)")
     src, dst = keys.key_code(args.src), keys.target_code(args.dst)
     console.print(render_keyboard(highlight={src}))
-    with open_keyboard(args) as kb:
-        kb.remap(1 if args.fn else 0, src, dst)
+    with Session(args) as (kb, st):
+        control.remap(kb, st, 1 if args.fn else 0, src, dst)
     ok(f"{'Fn+' if args.fn else ''}{keys.code_name(src)} → {keys.code_name(dst)}")
 
 
-def parse_macro_events(tokens: list[str], default_delay: int):
-    """'+a' press, '-a' release, 'a' tap; optional '@ms' delay suffix."""
-    events = []
-    for tok in tokens:
-        body, _, delay = tok.partition("@")
-        delay = int(delay) if delay else default_delay
-        if body[:1] in "+-" and len(body) > 1:
-            events.append((keys.key_code(body[1:]), body[0] == "-", delay))
-        else:
-            code = keys.key_code(body)
-            events += [(code, False, default_delay), (code, True, delay)]
-    return events
+def cmd_restore(args):
+    src = keys.key_code(args.src)
+    with Session(args) as (kb, st):
+        control.restore_key(kb, st, 1 if args.fn else 0, src)
+    ok(f"{'Fn+' if args.fn else ''}{keys.code_name(src)} back to default "
+       f"({len(st['remaps'])} remaps and {len(st['macros'])} macros re-sent)")
 
 
 def cmd_macro(args):
     src = keys.key_code(args.src)
     if not args.events:
         raise ValueError("macro needs at least one event")
-    events = parse_macro_events(args.events, args.delay)
+    raw = " ".join(args.events)
+    events = control.parse_macro_events(args.events, args.delay)
     table = Table(title=f"Macro on {'Fn+' if args.fn else ''}{keys.code_name(src)} "
                         f"(repeat ×{args.repeat})", box=box.SIMPLE)
     for col in ("#", "key", "action", "delay"):
@@ -228,14 +342,14 @@ def cmd_macro(args):
         table.add_row(str(i), keys.code_name(code),
                       "[red]release[/]" if release else "[green]press[/]", f"{delay} ms")
     console.print(table)
-    with open_keyboard(args) as kb:
-        kb.set_macro(1 if args.fn else 0, src, events, args.repeat)
+    with Session(args) as (kb, st):
+        control.set_macro(kb, st, 1 if args.fn else 0, src, raw, args.repeat)
     ok("macro stored")
 
 
 def cmd_reset_keys(args):
-    with open_keyboard(args) as kb:
-        kb.reset_keys()
+    with Session(args) as (kb, st):
+        control.reset_keys(kb, st)
     ok("key assignments reset to default")
 
 
@@ -243,8 +357,8 @@ def cmd_factory_reset(args):
     if not (args.yes or Confirm.ask("[red]Restore factory settings? All keyboard "
                                     "data will be erased[/]", default=False)):
         return
-    with open_keyboard(args) as kb:
-        kb.factory_reset()
+    with Session(args) as (kb, st):
+        control.factory_reset(kb, st)
     ok("factory reset sent")
 
 
@@ -256,168 +370,129 @@ def cmd_raw(args):
         console.print(resp.hex(" ") if resp else "[yellow]no reply[/]")
 
 
-# -- interactive menu -------------------------------------------------------
+UDEV_RULE = """\
+# AJAZZ AK820 Max Plus: let the logged-in user open the vendor config interface
+# (USB interface 0) only. The typing interfaces stay root-only, so nothing can
+# read keystrokes through this rule. Wired 1a2c:a036, 2.4G dongle 1a2c:8fff.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="1a2c", ATTRS{idProduct}=="a036|8fff", DEVPATH=="*:1.0/*", TAG+="uaccess"
+"""
+UDEV_PATH = "/etc/udev/rules.d/70-ajazz-ak820.rules"
 
-def interactive(args):
-    console.print(Panel.fit(f"[bold]AK820 Max Plus[/] Linux driver v{__version__}\n"
-                            "[dim]Ctrl-C to quit · run with --help for scripting[/]",
-                            border_style="magenta"))
-    try:
-        kb = open_keyboard(args)
-    except DeviceError as e:
-        console.print(f"[red]{e}[/]")
-        return 1
-    menu = {
-        "1": "Status / battery", "2": "Lighting effect", "3": "Solid colour (custom mode)",
-        "4": "Sleep timer", "5": "Key response time", "6": "Fn switch",
-        "7": "Remap a key", "8": "Reset key assignments", "q": "Quit",
-    }
-    try:
-        with kb:
-            while True:
-                table = Table(box=None, show_header=False)
-                for k, v in menu.items():
-                    table.add_row(f"[bold cyan]{k}[/]", v)
-                console.print(table)
-                choice = Prompt.ask("Select", choices=list(menu), default="1")
-                if choice == "q":
-                    return 0
-                if choice == "1":
-                    show_status(kb)
-                elif choice == "2":
-                    cmd_modes(args)
-                    mode = IntPrompt.ask("Mode", default=1)
-                    b = IntPrompt.ask("Brightness 1-5", default=keys.DEFAULT_BRIGHTNESS)
-                    s = IntPrompt.ask("Speed 1-5", default=keys.DEFAULT_SPEED)
-                    kb.set_light(mode, b, s)
-                    ok("lighting updated")
-                elif choice == "3":
-                    rgb = parse_color(Prompt.ask("Colour (name or RRGGBB)", default="white"))
-                    colors = {led: rgb for _, _, led, _, _ in keys.PHYSICAL_KEYS}
-                    console.print(render_keyboard(colors))
-                    kb.set_custom_colors(colors)
-                    ok("colour stored")
-                elif choice == "4":
-                    m = Prompt.ask("Sleep after (minutes)", choices=list(SLEEP_OPTIONS))
-                    kb.set_sleep(SLEEP_OPTIONS[m])
-                    ok(f"sleep timer: {m}")
-                elif choice == "5":
-                    g = IntPrompt.ask("Gear (1 fastest)", choices=["1", "2", "3"])
-                    kb.set_response(g)
-                    ok(f"response gear {g}")
-                elif choice == "6":
-                    m = Prompt.ask("Mode", choices=["normal", "fn"])
-                    kb.set_fn_switch(m == "fn")
-                    ok(f"Fn switch: {m}")
-                elif choice == "7":
-                    src = keys.key_code(Prompt.ask("Physical key (e.g. capslock)"))
-                    dst = keys.target_code(Prompt.ask("New function (e.g. esc, volup)"))
-                    kb.remap(0, src, dst)
-                    ok(f"{keys.code_name(src)} → {keys.code_name(dst)}")
-                elif choice == "8":
-                    if Confirm.ask("Reset all key assignments?", default=False):
-                        kb.reset_keys()
-                        ok("keys reset")
-    except KeyboardInterrupt:
-        console.print()
-    return 0
+
+def cmd_udev(args):
+    import subprocess
+    if not args.install:
+        console.print(Panel(UDEV_RULE.strip(), title=UDEV_PATH, expand=False))
+        console.print("install it with [bold]ak820ctl udev --install[/] (asks for sudo), "
+                      "then replug the keyboard or dongle")
+        return
+    subprocess.run(["sudo", "tee", UDEV_PATH], input=UDEV_RULE.encode(),
+                   stdout=subprocess.DEVNULL, check=True)
+    subprocess.run(["sudo", "udevadm", "control", "--reload"], check=True)
+    subprocess.run(["sudo", "udevadm", "trigger", "--subsystem-match=hidraw"], check=True)
+    ok(f"wrote {UDEV_PATH}; replug the keyboard or dongle if it still says permission denied")
+
+
+def cmd_tui(args):
+    from .tui import run
+    run(args.device, args.dry_run)
 
 
 # -- argument parsing -------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="ak820ctl", description="AJAZZ AK820 Max Plus control")
+    p = argparse.ArgumentParser(
+        prog="ak820ctl",
+        description="Unofficial AJAZZ AK820 Max Plus control. Run with no command for the TUI.")
     p.add_argument("--device", help="hidraw node (default: auto-detect)")
-    p.add_argument("-n", "--dry-run", action="store_true", help="print packets, send nothing")
+    p.add_argument("-n", "--dry-run", action="store_true",
+                   help="simulate: print packets, send nothing, don't touch saved state")
     p.add_argument("-v", "--verbose", action="store_true", help="show packets sent")
+    p.add_argument("--json", action="store_true", help="JSON output (status/devices/modes/keys)")
     p.add_argument("--version", action="version", version=__version__)
-    sub = p.add_subparsers(dest="command")
+    sub = p.add_subparsers(dest="command", metavar="command")
 
-    sub.add_parser("tui", help="full-screen interface (default)").set_defaults(func=cmd_tui)
-    sub.add_parser("menu", help="simple prompt menu").set_defaults(func=interactive)
-    sub.add_parser("devices", help="list detected interfaces").set_defaults(func=cmd_devices)
-    sub.add_parser("status", help="battery and link state").set_defaults(func=cmd_status)
-    sub.add_parser("modes", help="list lighting modes").set_defaults(func=cmd_modes)
-
-    s = sub.add_parser("light", help="set a lighting effect")
-    s.add_argument("mode", type=int)
-    s.add_argument("-b", "--brightness", type=int, default=keys.DEFAULT_BRIGHTNESS)
-    s.add_argument("-s", "--speed", type=int, default=keys.DEFAULT_SPEED)
-    s.add_argument("-d", "--direction", type=int, default=0)
-    s.add_argument("-c", "--color", type=int, default=0, help="palette index")
-    s.set_defaults(func=cmd_light)
-
-    for name, func, helptext in (("custom", cmd_custom, "store per-key colours"),
-                                 ("frame", cmd_frame, "send a live frame (experimental)")):
-        s = sub.add_parser(name, help=helptext)
-        s.add_argument("keys", nargs="*", metavar="KEY=COLOR", help="e.g. esc=red w=00ff00")
-        s.add_argument("-a", "--all", type=parse_color, help="base colour for every key")
-        if name == "custom":
-            s.add_argument("-b", "--brightness", type=int, default=keys.DEFAULT_BRIGHTNESS)
+    def add(name, func, help, aliases=()):
+        s = sub.add_parser(name, help=help, aliases=list(aliases))
         s.set_defaults(func=func)
+        return s
 
-    s = sub.add_parser("sleep", help="auto-sleep timer")
+    add("tui", cmd_tui, "full-screen interface (default)")
+    add("devices", cmd_devices, "list detected interfaces", ["detect"])
+    add("status", cmd_status, "battery and power state", ["info"])
+    add("modes", cmd_modes, "list lighting effects and colours", ["effects"])
+    add("keys", cmd_keys, "list key and media names")
+    s = add("udev", cmd_udev, "show or install the Linux permission rule")
+    s.add_argument("--install", action="store_true", help="write it to /etc/udev/rules.d (sudo)")
+
+    s = add("light", cmd_light, "set a lighting effect")
+    s.add_argument("effect", help="slug (breathing), number (8) or name prefix")
+    s.add_argument("-b", "--brightness", type=int, help="1..5")
+    s.add_argument("-s", "--speed", type=int, help="1..5")
+    s.add_argument("-d", "--direction", help="left-to-right | right-to-left")
+    s.add_argument("-c", "--color", help="red green blue yellow magenta cyan white rainbow")
+
+    s = add("lights", cmd_lights, "turn all LEDs off / back on")
+    s.add_argument("action", choices=["on", "off", "toggle"])
+
+    s = add("custom", cmd_custom, "store per-key colours (custom mode)")
+    s.add_argument("keys", nargs="*", metavar="KEY=COLOR", help="e.g. esc=red w=00ff00")
+    s.add_argument("-a", "--all", type=parse_color, help="base colour for every key")
+    s.add_argument("-b", "--brightness", type=int)
+    s.add_argument("--fresh", action="store_true",
+                   help="start from black instead of your last custom colours")
+
+    s = add("music", cmd_music, "audio-reactive lighting (needs ak820ctl[music])")
+    s.add_argument("--style", choices=["spectrum", "pulse", "wave"], default="spectrum")
+    s.add_argument("--color", help="single colour instead of rainbow")
+    s.add_argument("--sensitivity", type=float, default=1.0)
+    s.add_argument("--fps", type=int, default=30)
+
+    s = add("sleep", cmd_sleep, "auto-sleep timer")
     s.add_argument("minutes", choices=list(SLEEP_OPTIONS))
-    s.set_defaults(func=cmd_sleep)
-
-    s = sub.add_parser("response", help="key response time gear")
+    s = add("response", cmd_response, "key response time gear (1 fastest)")
     s.add_argument("gear", type=int, choices=[1, 2, 3])
-    s.set_defaults(func=cmd_response)
-
-    s = sub.add_parser("fn-switch", help="F-row default layer")
+    s = add("fn-switch", cmd_fn_switch, "F-row default layer (experimental)")
     s.add_argument("mode", choices=["normal", "fn"])
-    s.set_defaults(func=cmd_fn_switch)
 
-    s = sub.add_parser("remap", help="assign a key or media function to a key")
-    s.add_argument("src", nargs="?")
-    s.add_argument("dst", nargs="?")
+    s = add("remap", cmd_remap, "assign a key or media function to a key")
+    s.add_argument("src")
+    s.add_argument("dst")
     s.add_argument("--fn", action="store_true", help="Fn layer")
-    s.add_argument("--list-targets", action="store_true")
-    s.set_defaults(func=cmd_remap)
+    s = add("restore", cmd_restore, "put one key back to its default")
+    s.add_argument("src")
+    s.add_argument("--fn", action="store_true", help="Fn layer")
 
-    s = sub.add_parser("macro", help="store a keyboard macro on a key (options before SRC)")
+    s = add("macro", cmd_macro, "store a keyboard macro on a key (options before SRC)")
     s.add_argument("src")
     s.add_argument("events", nargs=argparse.REMAINDER,
                    help="'+a' press, '-a' release, 'a' tap, '@ms' delay")
     s.add_argument("--fn", action="store_true", help="Fn layer")
     s.add_argument("-r", "--repeat", type=int, default=1)
     s.add_argument("--delay", type=int, default=10, help="default delay ms")
-    s.set_defaults(func=cmd_macro)
 
-    sub.add_parser("reset-keys", help="restore default key assignments").set_defaults(
-        func=cmd_reset_keys)
-    s = sub.add_parser("factory-reset", help="restore factory settings")
+    add("reset-keys", cmd_reset_keys, "restore default key assignments")
+    s = add("factory-reset", cmd_factory_reset, "restore factory settings")
     s.add_argument("-y", "--yes", action="store_true")
-    s.set_defaults(func=cmd_factory_reset)
 
-    s = sub.add_parser("raw", help="send cmd+args after the AA55CC33 header")
+    s = add("raw", cmd_raw, "send cmd+args after the AA55CC33 header")
     s.add_argument("hex", nargs="+")
     s.add_argument("--reply", action="store_true")
-    s.set_defaults(func=cmd_raw)
     return p
-
-
-def cmd_tui(args):
-    try:
-        from .tui import run
-    except ImportError:
-        raise SystemExit("the TUI needs Textual: pip install textual")
-    run(args.device, args.dry_run)
 
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     try:
         if not args.command:
-            try:
-                import textual  # noqa: F401
-            except ImportError:
-                return interactive(args)
             cmd_tui(args)
             return 0
         args.func(args)
-    except (DeviceError, KeyError, ValueError) as e:
-        console.print(f"[bold red]error:[/] {e}")
+    except (DeviceError, KeyError, ValueError, OSError) as e:
+        if args.json:
+            emit_json({"error": str(e)})
+        else:
+            console.print(f"[bold red]error:[/] {e}")
         return 1
     return 0
 

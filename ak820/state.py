@@ -23,7 +23,8 @@ Colors = dict[int, tuple[int, int, int]]
 def default_state() -> dict:
     return {
         "light": {"mode": 7, "brightness": keys.DEFAULT_BRIGHTNESS,
-                  "speed": keys.DEFAULT_SPEED, "direction": 0, "color": 0},
+                  "speed": keys.DEFAULT_SPEED, "direction": 0, "color": keys.RAINBOW},
+        "lights_off": False,
         "colors": {},
         "remaps": {},   # "layer:src" -> dst
         "macros": {},   # "layer:src" -> {"events": str, "repeat": int}
@@ -40,6 +41,8 @@ def load() -> dict:
     for section, value in saved.items():
         if isinstance(data.get(section), dict) and isinstance(value, dict):
             data[section].update(value)
+        elif section in data and not isinstance(data[section], dict):
+            data[section] = value
     return data
 
 
